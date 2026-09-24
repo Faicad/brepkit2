@@ -1,0 +1,25 @@
+[package]
+description = "Vector math, transforms, NURBS, and geometric predicates for brepkit"
+edition.workspace = true
+license.workspace = true
+name = "brepkit-math"
+repository.workspace = true
+rust-version.workspace = true
+version = "0.1.0"
+
+[dependencies]
+log.workspace = true
+robust.workspace = true
+serde = {workspace = true, optional = true}
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde"]
+simd = []
+
+[lints]
+workspace = true

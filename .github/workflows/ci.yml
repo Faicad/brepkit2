@@ -1,0 +1,278 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+# rust-toolchain.toml pins the exact Rust version (1.96.0) and includes
+# rustfmt, clippy, and the wasm32 target. Rustup auto-detects it, so most
+# jobs don't need dtolnay/rust-toolchain.
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.62.30
+        with:
+          tool: nextest
+      - run: cargo nextest run --workspace
+      # nextest doesn't run doc tests, so run them separately
+      - run: cargo test --workspace --doc
+      # Complexity-regression guards: deterministic work-counter tests that fail
+      # if a boolean hot path regresses to O(N²) (issue #987). Gated behind the
+      # `perf-counters` feature, so they need an explicit run.
+      - name: Complexity guards
+        run: cargo nextest run -p brepkit-operations --features perf-counters -E 'test(scaling_)'
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.62.30
+        with:
+          tool: cargo-llvm-cov
+      - name: Generate coverage
+        run: |
+          cargo llvm-cov --workspace --no-report
+          cargo llvm-cov report --lcov --output-path lcov.info
+          COVERAGE=$(cargo llvm-cov report --json | jq -r '.data[0].totals.lines.percent // empty')
+          if [ -z "$COVERAGE" ]; then
+            echo "::error::Failed to extract coverage percentage from report"
+            exit 1
+          fi
+          echo "Line coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 60" | bc -l) )); then
+            echo "::error::Coverage ${COVERAGE}% is below the 60% threshold"
+            exit 1
+          fi
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: always()
+        with:
+          files: lcov.info
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Override rust-toolchain.toml to test the declared minimum version.
+      # Action SHA stays pinned; the Rust version is set explicitly below.
+      - uses: dtolnay/rust-toolchain@c93f4f9c67595668add93d3d6895795ce52d8c2d # 1.85.0
+        with:
+          toolchain: "1.88.0"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: msrv
+      - run: cargo check --workspace --all-features
+
+  wasm:
+    name: WASM Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.62.30
+        with:
+          tool: wasm-pack
+      - name: Build and validate WASM
+        run: cargo xtask wasm-build --skip-opt
+
+  wasm-size:
+    name: WASM Size Report
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build WASM (PR)
+        run: |
+          cargo build -p brepkit-wasm --target wasm32-unknown-unknown --release
+          PR_SIZE=$(stat --printf="%s" target/wasm32-unknown-unknown/release/brepkit_wasm.wasm)
+          echo "PR_SIZE=$PR_SIZE" >> "$GITHUB_ENV"
+          echo "PR_SIZE_MB=$(echo "scale=2; $PR_SIZE / 1048576" | bc)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          clean: false
+          path: base
+      - name: Build WASM (base)
+        run: |
+          cd base
+          cargo build -p brepkit-wasm --target wasm32-unknown-unknown --release
+          BASE_SIZE=$(stat --printf="%s" target/wasm32-unknown-unknown/release/brepkit_wasm.wasm)
+          echo "BASE_SIZE=$BASE_SIZE" >> "$GITHUB_ENV"
+          echo "BASE_SIZE_MB=$(echo "scale=2; $BASE_SIZE / 1048576" | bc)" >> "$GITHUB_ENV"
+      - name: Compute delta
+        run: |
+          DELTA=$(( PR_SIZE - BASE_SIZE ))
+          if [ $BASE_SIZE -gt 0 ]; then
+            PCT=$(echo "scale=1; $DELTA * 100 / $BASE_SIZE" | bc)
+          else
+            PCT="N/A"
+          fi
+          DELTA_KB=$(echo "scale=1; $DELTA / 1024" | bc)
+          if [ $DELTA -gt 0 ]; then
+            EMOJI="⚠️"
+            SIGN="+"
+          elif [ $DELTA -lt 0 ]; then
+            EMOJI="✅"
+            SIGN=""
+          else
+            EMOJI="✅"
+            SIGN=""
+          fi
+
+          {
+            echo "COMMENT_BODY<<WASM_EOF"
+            echo "## WASM Binary Size"
+            echo ""
+            echo "| File | main | PR | Delta |"
+            echo "|------|------|----|-------|"
+            echo "| \`brepkit_wasm.wasm\` | ${BASE_SIZE_MB} MB | ${PR_SIZE_MB} MB | ${SIGN}${DELTA_KB} KB (${SIGN}${PCT}%) |"
+            echo ""
+            if [ $DELTA -gt 51200 ]; then
+              echo "${EMOJI} Size increased by >50 KB. Please verify this is expected."
+            elif [ $DELTA -gt 0 ]; then
+              echo "${EMOJI} Size increased slightly."
+            elif [ $DELTA -eq 0 ]; then
+              echo "${EMOJI} No size change."
+            else
+              echo "${EMOJI} Size decreased — nice!"
+            fi
+            echo "WASM_EOF"
+          } >> "$GITHUB_ENV"
+      - name: Find existing comment
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "## WASM Binary Size"
+      - name: Post or update comment
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ env.COMMENT_BODY }}
+          edit-mode: replace
+
+  boundaries:
+    name: Layer Boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: ./scripts/check-boundaries.sh
+
+  doc-paths:
+    name: Doc Paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: ./scripts/check-doc-paths.sh
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Cargo.lock is gitignored (library crate), generate it for audit
+      - run: cargo generate-lockfile
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ github.token }}
+
+  docs:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  machete:
+    name: Unused Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --version 0.9.1 --locked
+      - run: cargo machete
+
+  taplo:
+    name: TOML Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install taplo
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-full-linux-x86_64.gz \
+            | gunzip > "$HOME/.local/bin/taplo"
+          chmod +x "$HOME/.local/bin/taplo"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: taplo fmt --check
+
+  ci-pass:
+    name: CI Pass
+    if: always()
+    needs: [fmt, clippy, test, coverage, msrv, wasm, boundaries, deny, audit, docs, machete, taplo]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' > /dev/null

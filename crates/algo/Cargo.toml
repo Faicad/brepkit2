@@ -1,0 +1,29 @@
+[package]
+description = "GFA boolean algorithm engine for brepkit"
+edition.workspace = true
+license.workspace = true
+name = "brepkit-algo"
+repository.workspace = true
+rust-version.workspace = true
+version = "0.1.0"
+
+[dependencies]
+brepkit-math.workspace = true
+brepkit-topology.workspace = true
+
+log.workspace = true
+thiserror.workspace = true
+
+[features]
+# Enables deterministic work counters (`perf` module) used by the
+# complexity-regression scaling guards. Off by default — zero cost in normal
+# and release builds (the bump calls compile to nothing).
+perf-counters = []
+
+[dev-dependencies]
+brepkit-check.workspace = true
+brepkit-topology = {workspace = true, features = ["test-utils"]}
+proptest.workspace = true
+
+[lints]
+workspace = true

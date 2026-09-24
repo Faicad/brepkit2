@@ -1,0 +1,210 @@
+//! Phase VE: Vertex-on-edge interference detection.
+//!
+//! For each (vertex, edge) pair across solids, checks if the vertex
+//! lies on the edge. If so, adds an extra pave to the edge's pave block.
+
+use brepkit_math::aabb::Aabb3;
+use brepkit_math::tolerance::Tolerance;
+use brepkit_math::vec::Point3;
+use brepkit_topology::Topology;
+use brepkit_topology::edge::EdgeId;
+use brepkit_topology::solid::SolidId;
+use brepkit_topology::vertex::VertexId;
+
+use crate::ds::{GfaArena, Interference, Pave};
+use crate::error::AlgoError;
+
+/// Samples used to bound a curved edge's AABB for the broad-phase reject.
+const N_AABB_SAMPLES: usize = 16;
+
+/// Compute a conservative AABB for an edge, expanded by `margin`.
+fn edge_aabb(topo: &Topology, eid: EdgeId, margin: f64) -> Result<Option<Aabb3>, AlgoError> {
+    let edge = topo.edge(eid)?;
+    let start_pos = topo.vertex(edge.start())?.point();
+    let end_pos = topo.vertex(edge.end())?.point();
+    if matches!(edge.curve(), brepkit_topology::edge::EdgeCurve::Line) {
+        return Ok(Aabb3::try_from_points([start_pos, end_pos]).map(|a| a.expanded(margin)));
+    }
+    let (t0, t1) = edge.curve().domain_with_endpoints(start_pos, end_pos);
+    let pts = (0..=N_AABB_SAMPLES).map(|i| {
+        let t = t0 + (t1 - t0) * (i as f64 / N_AABB_SAMPLES as f64);
+        edge.curve().evaluate_with_endpoints(t, start_pos, end_pos)
+    });
+    Ok(Aabb3::try_from_points(pts).map(|a| a.expanded(margin)))
+}
+
+/// Detect vertices lying on edges between the two solids.
+///
+/// Checks vertices of A against edges of B, and vertices of B against
+/// edges of A. When a vertex lies on an edge (within tolerance), an
+/// extra pave is inserted into the edge's pave block for later splitting.
+///
+/// # Errors
+///
+/// Returns [`AlgoError`] if any topology lookup fails.
+pub fn perform(
+    topo: &Topology,
+    solid_a: SolidId,
+    solid_b: SolidId,
+    tol: Tolerance,
+    arena: &mut GfaArena,
+) -> Result<(), AlgoError> {
+    // AABB pre-filter: skip if solids are disjoint
+    let bbox_a = crate::classifier::compute_solid_bbox(topo, solid_a)?;
+    let bbox_b = crate::classifier::compute_solid_bbox(topo, solid_b)?;
+    if !bbox_a
+        .expanded(tol.linear)
+        .intersects(bbox_b.expanded(tol.linear))
+    {
+        log::debug!("VE: solids are disjoint, skipping");
+        return Ok(());
+    }
+
+    let verts_a = brepkit_topology::explorer::solid_vertices(topo, solid_a)?;
+    let verts_b = brepkit_topology::explorer::solid_vertices(topo, solid_b)?;
+    let edges_a = brepkit_topology::explorer::solid_edges(topo, solid_a)?;
+    let edges_b = brepkit_topology::explorer::solid_edges(topo, solid_b)?;
+
+    check_vertex_edge_pairs(topo, &verts_a, &edges_b, tol, arena)?;
+    check_vertex_edge_pairs(topo, &verts_b, &edges_a, tol, arena)?;
+
+    Ok(())
+}
+
+/// Check each vertex against each edge and record VE interferences.
+#[allow(clippy::too_many_lines)]
+fn check_vertex_edge_pairs(
+    topo: &Topology,
+    vertices: &[VertexId],
+    edges: &[EdgeId],
+    tol: Tolerance,
+    arena: &mut GfaArena,
+) -> Result<(), AlgoError> {
+    // Broad-phase: bound each edge once. A vertex lying on an edge is within
+    // the edge's AABB, so vertices outside it are rejected before the costly
+    // closest-point projection (32 samples + 20 ternary steps per pair).
+    // Margin covers both the global linear tolerance and per-vertex tolerance,
+    // which is added to `tol.linear` in the fine test below.
+    let mut edge_boxes: Vec<Option<Aabb3>> = Vec::with_capacity(edges.len());
+    for &eid in edges {
+        edge_boxes.push(edge_aabb(topo, eid, tol.linear)?);
+    }
+
+    for &vid in vertices {
+        let resolved_vid = arena.resolve_vertex(vid);
+        let vertex = topo.vertex(resolved_vid)?;
+        let pos = vertex.point();
+        let vtol = vertex.tolerance();
+
+        for (edge_idx, &eid) in edges.iter().enumerate() {
+            // Broad-phase reject: the vertex cannot lie on an edge whose
+            // (tolerance-expanded by vtol) AABB does not contain it.
+            if let Some(ebox) = &edge_boxes[edge_idx]
+                && !ebox.expanded(vtol).contains_point(pos)
+            {
+                continue;
+            }
+
+            let edge = topo.edge(eid)?;
+
+            // Skip if vertex is already an endpoint of this edge
+            let start_v = arena.resolve_vertex(edge.start());
+            let end_v = arena.resolve_vertex(edge.end());
+            if resolved_vid == start_v || resolved_vid == end_v {
+                continue;
+            }
+
+            let start_pos = topo.vertex(edge.start())?.point();
+            let end_pos = topo.vertex(edge.end())?.point();
+            let (t0, t1) = edge.curve().domain_with_endpoints(start_pos, end_pos);
+
+            let param = project_point_on_edge(topo, eid, pos)?;
+
+            if param < t0 - 1e-10 || param > t1 + 1e-10 {
+                continue;
+            }
+
+            let edge_pt = edge
+                .curve()
+                .evaluate_with_endpoints(param, start_pos, end_pos);
+            let dist = (pos - edge_pt).length();
+
+            let combined_tol = vtol + tol.linear;
+            if dist <= combined_tol {
+                let pave = Pave::new(resolved_vid, param);
+                if let Some(pb_ids) = arena.edge_pave_blocks.get(&eid) {
+                    let pb_ids_copy: Vec<_> = pb_ids.clone();
+                    for pb_id in pb_ids_copy {
+                        if let Some(pb) = arena.pave_blocks.get_mut(pb_id) {
+                            let (pb_start, pb_end) = pb.parameter_range();
+                            if param > pb_start + 1e-10 && param < pb_end - 1e-10 {
+                                pb.add_extra_pave(pave);
+                            }
+                        }
+                    }
+                }
+
+                arena.interference.ve.push(Interference::VE {
+                    vertex: resolved_vid,
+                    edge: eid,
+                    parameter: param,
+                });
+
+                log::debug!(
+                    "VE: vertex {resolved_vid:?} on edge {eid:?} at t={param:.6} (dist={dist:.2e})",
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Project a point onto an edge curve, returning the closest parameter.
+///
+/// Uses coarse sampling followed by ternary search refinement for
+/// robustness across all edge curve types.
+fn project_point_on_edge(
+    topo: &Topology,
+    edge_id: EdgeId,
+    point: Point3,
+) -> Result<f64, AlgoError> {
+    let edge = topo.edge(edge_id)?;
+    let start_pos = topo.vertex(edge.start())?.point();
+    let end_pos = topo.vertex(edge.end())?.point();
+    let (t0, t1) = edge.curve().domain_with_endpoints(start_pos, end_pos);
+
+    let n_samples: usize = 32;
+    let mut best_t = t0;
+    let mut best_dist_sq = f64::MAX;
+
+    for i in 0..=n_samples {
+        let t = t0 + (t1 - t0) * (i as f64 / n_samples as f64);
+        let pt = edge.curve().evaluate_with_endpoints(t, start_pos, end_pos);
+        let d_sq = (point - pt).length_squared();
+        if d_sq < best_dist_sq {
+            best_dist_sq = d_sq;
+            best_t = t;
+        }
+    }
+
+    let dt = (t1 - t0) / n_samples as f64;
+    let mut lo = (best_t - dt).max(t0);
+    let mut hi = (best_t + dt).min(t1);
+
+    for _ in 0..20 {
+        let m1 = lo + (hi - lo) / 3.0;
+        let m2 = hi - (hi - lo) / 3.0;
+        let d1 =
+            (point - edge.curve().evaluate_with_endpoints(m1, start_pos, end_pos)).length_squared();
+        let d2 =
+            (point - edge.curve().evaluate_with_endpoints(m2, start_pos, end_pos)).length_squared();
+        if d1 < d2 {
+            hi = m2;
+        } else {
+            lo = m1;
+        }
+    }
+
+    Ok(f64::midpoint(lo, hi))
+}

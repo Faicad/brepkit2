@@ -1,0 +1,25 @@
+[package]
+description = "B-Rep topological data structures for brepkit"
+edition.workspace = true
+license.workspace = true
+name = "brepkit-topology"
+repository.workspace = true
+rust-version.workspace = true
+version = "0.1.0"
+
+[dependencies]
+brepkit-math.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+default = []
+
+test-utils = []
+
+[lints]
+workspace = true

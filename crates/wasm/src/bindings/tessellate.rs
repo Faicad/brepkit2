@@ -1,0 +1,447 @@
+//! Tessellation and wireframe bindings.
+
+#![allow(clippy::missing_errors_doc)]
+
+use brepkit_operations::tessellate;
+use wasm_bindgen::prelude::*;
+
+use crate::error::validate_positive;
+use crate::kernel::BrepKernel;
+use crate::shapes::{JsGroupedMesh, JsMesh};
+use crate::types::{GroupedMeshResult, UvMeshResult};
+
+/// Resolve an optional angular-tolerance argument, validating it when present
+/// and falling back to the default angular cap when absent.
+fn resolve_angular_tol(angular_tolerance: Option<f64>) -> Result<f64, JsError> {
+    match angular_tolerance {
+        Some(a) => {
+            validate_positive(a, "angularTolerance")?;
+            Ok(a)
+        }
+        None => Ok(brepkit_math::chord::DEFAULT_ANGULAR_TOL),
+    }
+}
+
+#[wasm_bindgen]
+impl BrepKernel {
+    // ── Tessellation ───────────────────────────────────────────────
+
+    /// Tessellate a single face into a triangle mesh.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the face handle is invalid or tessellation fails.
+    #[wasm_bindgen(js_name = "tessellateFace")]
+    pub fn tessellate_face(
+        &self,
+        face: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<JsMesh, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let face_id = self.resolve_face(face)?;
+        let mesh =
+            tessellate::tessellate_with_tolerance(&self.topo, face_id, deflection, angular_tol)?;
+        Ok(mesh.into())
+    }
+
+    /// Tessellate all faces of a solid into a single merged triangle mesh.
+    ///
+    /// Includes both the outer shell and any inner shells (voids).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the solid handle is invalid or tessellation fails.
+    #[wasm_bindgen(js_name = "tessellateSolid")]
+    pub fn tessellate_solid(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<JsMesh, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+
+        // Use watertight tessellation that shares edge vertices between
+        // adjacent faces, eliminating cracks at face boundaries.
+        let merged = tessellate::tessellate_solid_with_tolerance(
+            &self.topo,
+            solid_id,
+            deflection,
+            angular_tol,
+        )?;
+
+        Ok(merged.into())
+    }
+
+    /// Tessellate a solid with per-face triangle grouping.
+    ///
+    /// Returns a JSON string containing `{ positions, normals, indices, faceOffsets }`.
+    /// `faceOffsets` is an array where `faceOffsets[i]` is the start index into
+    /// `indices` for face `i`, and the last element is `indices.length`.
+    ///
+    /// Uses the watertight shared-edge-pool tessellation: adjacent faces share
+    /// identical boundary vertices, so the exported mesh has no T-junctions
+    /// regardless of how the solid was constructed (booleans included).
+    #[wasm_bindgen(js_name = "tessellateSolidGrouped")]
+    pub fn tessellate_solid_grouped(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<JsValue, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+
+        let (mesh, face_offsets) = tessellate::tessellate_solid_grouped_with_tolerance(
+            &self.topo,
+            solid_id,
+            deflection,
+            angular_tol,
+        )?;
+
+        let mut all_positions: Vec<f64> = Vec::with_capacity(mesh.positions.len() * 3);
+        for p in &mesh.positions {
+            all_positions.extend_from_slice(&[p.x(), p.y(), p.z()]);
+        }
+        let mut all_normals: Vec<f64> = Vec::with_capacity(mesh.normals.len() * 3);
+        for n in &mesh.normals {
+            all_normals.extend_from_slice(&[n.x(), n.y(), n.z()]);
+        }
+
+        let result = GroupedMeshResult {
+            positions: all_positions,
+            normals: all_normals,
+            indices: mesh.indices,
+            face_offsets,
+        };
+        Ok(serde_json::to_string(&result)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .into())
+    }
+
+    /// Tessellate a solid with per-face grouping, returned as packed binary
+    /// buffers ([`JsGroupedMesh`]) instead of a JSON string.
+    ///
+    /// Identical geometry to [`tessellate_solid_grouped`](Self::tessellate_solid_grouped),
+    /// but the mesh crosses the WASM boundary as `Float32Array`/`Uint32Array`
+    /// bulk copies rather than a (potentially multi-megabyte) JSON string that
+    /// the caller must `JSON.parse` and re-pack — far cheaper for large meshes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the solid handle is invalid or tessellation fails.
+    #[wasm_bindgen(js_name = "tessellateSolidGroupedBinary")]
+    pub fn tessellate_solid_grouped_binary(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<JsGroupedMesh, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+
+        let (mesh, face_offsets) = tessellate::tessellate_solid_grouped_with_tolerance(
+            &self.topo,
+            solid_id,
+            deflection,
+            angular_tol,
+        )?;
+
+        Ok(JsGroupedMesh::new(mesh, face_offsets))
+    }
+
+    /// Tessellate a solid and include per-vertex UV coordinates.
+    ///
+    /// Returns a JSON string containing `{ positions, normals, indices, uvs }`.
+    /// `uvs` is a flat array of `[u0, v0, u1, v1, ...]` values, two per vertex.
+    /// For analytic and NURBS surfaces, these are the parametric (u, v) values.
+    /// For planar faces, UVs are computed by projection onto the face plane.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the solid handle is invalid or tessellation fails.
+    #[wasm_bindgen(js_name = "tessellateSolidUV")]
+    pub fn tessellate_solid_uv(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<JsValue, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+        let faces = brepkit_topology::explorer::solid_faces(&self.topo, solid_id)?;
+
+        let mut all_positions: Vec<f64> = Vec::new();
+        let mut all_normals: Vec<f64> = Vec::new();
+        let mut all_uvs: Vec<f64> = Vec::new();
+        let mut all_indices: Vec<u32> = Vec::new();
+
+        for &face_id in &faces {
+            #[allow(clippy::cast_possible_truncation)]
+            let idx_offset = (all_positions.len() / 3) as u32;
+
+            let mesh_uv =
+                tessellate::tessellate_with_uvs_a(&self.topo, face_id, deflection, angular_tol)?;
+            for p in &mesh_uv.mesh.positions {
+                all_positions.extend_from_slice(&[p.x(), p.y(), p.z()]);
+            }
+            for n in &mesh_uv.mesh.normals {
+                all_normals.extend_from_slice(&[n.x(), n.y(), n.z()]);
+            }
+            for uv in &mesh_uv.uvs {
+                all_uvs.extend_from_slice(uv);
+            }
+            for &idx in &mesh_uv.mesh.indices {
+                all_indices.push(idx + idx_offset);
+            }
+        }
+
+        let result = UvMeshResult {
+            positions: all_positions,
+            normals: all_normals,
+            indices: all_indices,
+            uvs: all_uvs,
+        };
+        Ok(serde_json::to_string(&result)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .into())
+    }
+
+    // ── Edge wireframe ────────────────────────────────────────────
+
+    /// Sample edges of a solid into polylines for wireframe rendering.
+    ///
+    /// Returns a `JsEdgeLines` containing flattened positions and per-edge
+    /// offset indices. The `deflection` parameter controls sampling density.
+    ///
+    /// Smooth edges (between faces on the same underlying surface) are
+    /// automatically filtered out to reduce wireframe clutter. These edges
+    /// arise from boolean face-splitting and don't represent visible creases.
+    #[wasm_bindgen(js_name = "meshEdges")]
+    pub fn mesh_edges(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<crate::shapes::JsEdgeLines, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+        let edge_lines = tessellate::sample_solid_edges_filtered(
+            &self.topo,
+            solid_id,
+            deflection,
+            angular_tol,
+            true,
+        )?;
+        Ok(edge_lines.into())
+    }
+
+    /// Sample ALL edges of a solid (no smooth-edge filtering).
+    ///
+    /// Same as `meshEdges` but includes edges between co-surface faces.
+    /// Useful for debugging topology.
+    #[wasm_bindgen(js_name = "meshEdgesAll")]
+    pub fn mesh_edges_all(
+        &self,
+        solid: u32,
+        deflection: f64,
+        angular_tolerance: Option<f64>,
+    ) -> Result<crate::shapes::JsEdgeLines, JsError> {
+        validate_positive(deflection, "deflection")?;
+        let angular_tol = resolve_angular_tol(angular_tolerance)?;
+        let solid_id = self.resolve_solid(solid)?;
+        let edge_lines = tessellate::sample_solid_edges_filtered(
+            &self.topo,
+            solid_id,
+            deflection,
+            angular_tol,
+            false,
+        )?;
+        Ok(edge_lines.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use crate::kernel::BrepKernel;
+
+    /// Create a kernel containing a 2×3×4 box and return (kernel, solid_handle).
+    fn kernel_with_box() -> (BrepKernel, u32) {
+        let mut k = BrepKernel::new();
+        let solid = k.make_box_solid(2.0, 3.0, 4.0).unwrap();
+        (k, solid)
+    }
+
+    // ── tessellate_solid ──────────────────────────────────────────
+
+    #[test]
+    fn tessellate_solid_box_produces_nonempty_mesh() {
+        let (k, solid) = kernel_with_box();
+        let mesh = k.tessellate_solid(solid, 0.1, None).unwrap();
+        assert!(mesh.vertex_count() > 0, "expected vertices, got 0");
+        assert!(mesh.triangle_count() > 0, "expected triangles, got 0");
+    }
+
+    #[test]
+    fn tessellate_solid_positions_and_normals_lengths_match() {
+        let (k, solid) = kernel_with_box();
+        let mesh = k.tessellate_solid(solid, 0.1, None).unwrap();
+        let positions = mesh.positions();
+        let normals = mesh.normals();
+        // Both must be flat [x, y, z, …] arrays — same length
+        assert_eq!(
+            positions.len(),
+            normals.len(),
+            "positions.len()={} normals.len()={}",
+            positions.len(),
+            normals.len()
+        );
+        // Divisible by 3 (complete xyz triples)
+        assert_eq!(positions.len() % 3, 0);
+    }
+
+    #[test]
+    fn tessellate_solid_indices_are_valid_vertex_refs() {
+        let (k, solid) = kernel_with_box();
+        let mesh = k.tessellate_solid(solid, 0.1, None).unwrap();
+        let vertex_count = mesh.vertex_count();
+        let indices = mesh.indices();
+        for &idx in &indices {
+            assert!(
+                idx < vertex_count,
+                "index {idx} out of bounds (vertex_count={vertex_count})"
+            );
+        }
+    }
+
+    #[test]
+    fn tessellate_solid_coarser_deflection_has_fewer_triangles() {
+        let (k, solid) = kernel_with_box();
+        let fine = k.tessellate_solid(solid, 0.01, None).unwrap();
+        let coarse = k.tessellate_solid(solid, 1.0, None).unwrap();
+        assert!(
+            fine.triangle_count() >= coarse.triangle_count(),
+            "fine={} coarse={}",
+            fine.triangle_count(),
+            coarse.triangle_count()
+        );
+    }
+
+    // ── tessellate_solid_grouped ──────────────────────────────────
+    // tessellate_solid_grouped returns a JsValue (via JsValue::from_str),
+    // which panics on non-wasm targets. Test the underlying logic via the
+    // operations layer instead.
+
+    #[test]
+    fn tessellate_solid_grouped_via_operations() {
+        let mut topo = brepkit_topology::topology::Topology::new();
+        let solid = brepkit_operations::primitives::make_box(&mut topo, 2.0, 3.0, 4.0).unwrap();
+
+        let (mesh, face_offsets) =
+            brepkit_operations::tessellate::tessellate_solid_grouped_with_tolerance(
+                &topo,
+                solid,
+                0.1,
+                brepkit_math::chord::DEFAULT_ANGULAR_TOL,
+            )
+            .unwrap();
+
+        assert!(!mesh.positions.is_empty(), "expected vertices");
+        assert!(!mesh.indices.is_empty(), "expected indices");
+        // Box has 6 faces, so faceOffsets has 7 entries (6 starts + 1 sentinel).
+        assert_eq!(face_offsets.len(), 7, "expected 7 face offsets for a box");
+        assert_eq!(*face_offsets.last().unwrap() as usize, mesh.indices.len());
+        // Watertight grouped output: every group is a non-empty triangle run.
+        for w in face_offsets.windows(2) {
+            assert!(w[0] < w[1], "box face groups must be non-empty");
+            assert_eq!((w[1] - w[0]) % 3, 0);
+        }
+        assert!(
+            brepkit_operations::tessellate::is_watertight(&mesh),
+            "grouped box mesh must be watertight"
+        );
+    }
+
+    // ── mesh_edges_all ────────────────────────────────────────────
+
+    #[test]
+    fn mesh_edges_all_box_produces_nonempty_edge_lines() {
+        let (k, solid) = kernel_with_box();
+        let edge_lines = k.mesh_edges_all(solid, 0.1, None).unwrap();
+        assert!(edge_lines.edge_count() > 0, "expected edges, got 0");
+        assert!(
+            !edge_lines.positions().is_empty(),
+            "positions must be non-empty"
+        );
+    }
+
+    #[test]
+    fn mesh_edges_all_box_has_twelve_edges() {
+        // A box has exactly 12 edges.
+        let (k, solid) = kernel_with_box();
+        let edge_lines = k.mesh_edges_all(solid, 0.1, None).unwrap();
+        assert_eq!(
+            edge_lines.edge_count(),
+            12,
+            "expected 12 box edges, got {}",
+            edge_lines.edge_count()
+        );
+    }
+
+    // ── Invalid handle ────────────────────────────────────────────
+    // Error-path tests use internal operations to avoid JsError panics.
+
+    #[test]
+    fn tessellate_solid_invalid_handle_returns_error() {
+        let mut k = BrepKernel::new();
+        let r = k.execute_batch(
+            r#"[{"op": "tessellateSolid", "args": {"solid": 9999, "deflection": 0.1}}]"#,
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+        assert!(parsed[0]["error"].is_string());
+    }
+
+    #[test]
+    fn mesh_edges_all_invalid_handle_returns_error() {
+        let mut k = BrepKernel::new();
+        let r = k.execute_batch(
+            r#"[{"op": "meshEdgesAll", "args": {"solid": 9999, "deflection": 0.1}}]"#,
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&r).unwrap();
+        assert!(parsed[0]["error"].is_string());
+    }
+
+    // ── Zero / non-positive deflection ────────────────────────────
+    // validate_positive is a pure function that returns WasmError (not JsError),
+    // so we test the validation logic directly.
+
+    #[test]
+    fn tessellate_solid_zero_deflection_is_invalid() {
+        use crate::error::validate_positive;
+        let result = validate_positive(0.0, "deflection");
+        assert!(result.is_err(), "zero deflection must be rejected");
+    }
+
+    #[test]
+    fn mesh_edges_all_zero_deflection_is_invalid() {
+        use crate::error::validate_positive;
+        let result = validate_positive(0.0, "deflection");
+        assert!(result.is_err(), "zero deflection must be rejected");
+    }
+
+    #[test]
+    fn negative_deflection_is_invalid() {
+        use crate::error::validate_positive;
+        let result = validate_positive(-1.0, "deflection");
+        assert!(result.is_err(), "negative deflection must be rejected");
+    }
+}

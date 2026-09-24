@@ -1,0 +1,55 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# WASM
+/pkg/
+*.wasm
+
+# xtask (standalone crate, has its own target dir)
+/xtask/target/
+/xtask/Cargo.lock
+
+# Node
+node_modules/
+bindings/ts/dist/
+bindings/ts/pkg/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+*.profraw
+lcov.info
+tarpaulin-report.html
+
+# Benchmark results
+/bench-results/
+
+# mdBook
+/book/book/
+
+# Claude Code working files (memory, worktrees, research)
+.claude/agent-memory-local/
+.claude/worktrees/
+.claude/research/
+.claude/*.md
+!.claude/settings.json
+
+# Git worktrees
+.worktrees/
+
+# Internal docs (prevent accidental commits)
+*-INTERNAL.md
+ISSUES-*.md
+ROADMAP.md
+.claude/scheduled_tasks.lock

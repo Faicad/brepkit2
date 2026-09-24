@@ -1,0 +1,789 @@
+//! Phase EF: Edge-face intersection detection.
+//!
+//! For each (edge, face) pair across solids, finds points where the
+//! edge crosses or touches the face surface. Records EF interferences
+//! and adds extra paves to the edge for later splitting.
+
+use std::collections::HashSet;
+
+use crate::builder::classify_2d::{distance_to_polygon_boundary, point_in_polygon_2d};
+use crate::builder::plane_frame::PlaneFrame;
+use crate::ds::{GfaArena, Interference, Pave};
+use crate::error::AlgoError;
+use brepkit_math::aabb::Aabb3;
+use brepkit_math::tolerance::Tolerance;
+use brepkit_math::vec::{Point2, Point3, Vec3};
+use brepkit_topology::Topology;
+use brepkit_topology::edge::{EdgeCurve, EdgeId};
+use brepkit_topology::face::{FaceId, FaceSurface};
+use brepkit_topology::solid::SolidId;
+use brepkit_topology::vertex::Vertex;
+
+use super::helpers::{add_pave_to_edge, find_nearby_pave_vertex as find_nearby_vertex};
+
+/// Number of samples along each edge for sign-change detection.
+const N_SAMPLES: usize = 64;
+
+/// Number of samples per boundary edge for face containment polygons.
+const N_BOUNDARY_SAMPLES: usize = 32;
+
+/// Detect edge-face intersections between the two solids.
+///
+/// Checks edges of A against faces of B, and edges of B against
+/// faces of A. When an edge crosses a face surface (within tolerance),
+/// an EF interference is recorded and an extra pave is added to the
+/// edge's pave block.
+///
+/// # Errors
+///
+/// Returns [`AlgoError`] if any topology lookup fails.
+pub fn perform(
+    topo: &mut Topology,
+    solid_a: SolidId,
+    solid_b: SolidId,
+    tol: Tolerance,
+    arena: &mut GfaArena,
+) -> Result<(), AlgoError> {
+    let bbox_a = crate::classifier::compute_solid_bbox(topo, solid_a)?;
+    let bbox_b = crate::classifier::compute_solid_bbox(topo, solid_b)?;
+    if !bbox_a
+        .expanded(tol.linear)
+        .intersects(bbox_b.expanded(tol.linear))
+    {
+        log::debug!("EF: solids are disjoint, skipping");
+        return Ok(());
+    }
+
+    let edges_a = brepkit_topology::explorer::solid_edges(topo, solid_a)?;
+    let edges_b = brepkit_topology::explorer::solid_edges(topo, solid_b)?;
+    let faces_a = brepkit_topology::explorer::solid_faces(topo, solid_a)?;
+    let faces_b = brepkit_topology::explorer::solid_faces(topo, solid_b)?;
+
+    // Collect face boundary edge sets to skip edges that are already
+    // on the face boundary.
+    let face_boundary_edges_b = collect_face_boundary_edges(topo, &faces_b)?;
+    let face_boundary_edges_a = collect_face_boundary_edges(topo, &faces_a)?;
+
+    check_edge_face_pairs(topo, &edges_a, &faces_b, &face_boundary_edges_b, tol, arena)?;
+    check_edge_face_pairs(topo, &edges_b, &faces_a, &face_boundary_edges_a, tol, arena)?;
+
+    Ok(())
+}
+
+/// Collect the set of boundary edge IDs for each face.
+fn collect_face_boundary_edges(
+    topo: &Topology,
+    faces: &[FaceId],
+) -> Result<Vec<HashSet<EdgeId>>, AlgoError> {
+    let mut result = Vec::with_capacity(faces.len());
+    for &fid in faces {
+        let edges = brepkit_topology::explorer::face_edges(topo, fid)?;
+        result.push(edges.into_iter().collect());
+    }
+    Ok(result)
+}
+
+/// Spatial containment test for a face, built from sampled boundary edges.
+///
+/// Surface crossings are found against infinite surfaces; this rejects
+/// crossing points that lie outside the trimmed face region.
+struct FaceContainment {
+    bbox: Aabb3,
+    planar: Option<PlanarContainment>,
+}
+
+struct PlanarContainment {
+    frame: PlaneFrame,
+    polygon: Vec<Point2>,
+    margin: f64,
+}
+
+impl FaceContainment {
+    fn accepts(&self, pt: Point3) -> bool {
+        if !self.bbox.contains_point(pt) {
+            return false;
+        }
+        let Some(planar) = &self.planar else {
+            return true;
+        };
+        let p2 = planar.frame.project(pt);
+        point_in_polygon_2d(p2, &planar.polygon)
+            || distance_to_polygon_boundary(p2, &planar.polygon) <= planar.margin
+    }
+}
+
+/// Sample a face's boundary into an AABB plus, for planar faces, an
+/// in-plane outer-wire polygon for exact containment testing.
+fn build_face_containment(
+    topo: &Topology,
+    fid: FaceId,
+    tol: Tolerance,
+) -> Result<FaceContainment, AlgoError> {
+    let face = topo.face(fid)?;
+    let surface = face.surface().clone();
+    let outer_wire_id = face.outer_wire();
+
+    let mut all_points = Vec::new();
+    let mut outer_points = Vec::new();
+    let mut max_chord = 0.0_f64;
+
+    let outer_wire = topo.wire(outer_wire_id)?;
+    let oriented: Vec<_> = outer_wire.edges().to_vec();
+    let mut prev: Option<Point3> = None;
+    for oe in &oriented {
+        let edge = topo.edge(oe.edge())?;
+        let start_pos = topo.vertex(edge.start())?.point();
+        let end_pos = topo.vertex(edge.end())?.point();
+        let (t0, t1) = edge.curve().domain_with_endpoints(start_pos, end_pos);
+        // Only curved edges contribute to the sagitta margin: a straight Line
+        // edge's sampled chords coincide with the edge exactly (zero sagitta),
+        // so it must not inflate `max_chord`. Basing the margin on a long
+        // straight edge would over-extend a thin face's boundary band (a
+        // 123mm-wide × 1mm-tall ramp strip got a 1.9mm margin, admitting EF
+        // crossings well outside it — the 3×3 scoop+label lip-corner fallback).
+        let is_curved = !matches!(edge.curve(), EdgeCurve::Line);
+        let n = N_BOUNDARY_SAMPLES;
+        // Sample inclusive of the edge's end vertex (0..=n) so the closing
+        // segment of a closed wire reaches the true endpoint; consecutive
+        // edges share a vertex, so dedup against the previous point.
+        for i in 0..=n {
+            let frac = i as f64 / n as f64;
+            let frac = if oe.is_forward() { frac } else { 1.0 - frac };
+            let t = t0 + (t1 - t0) * frac;
+            let pt = edge.curve().evaluate_with_endpoints(t, start_pos, end_pos);
+            if let Some(p) = prev {
+                if (pt - p).length() <= tol.linear {
+                    continue;
+                }
+                if is_curved {
+                    max_chord = max_chord.max((pt - p).length());
+                }
+            }
+            prev = Some(pt);
+            outer_points.push(pt);
+        }
+    }
+    // The last edge's end vertex coincides with the first edge's start
+    // vertex on a closed wire; drop the duplicate so the closing polygon
+    // segment isn't degenerate.
+    if outer_points.len() >= 2
+        && let (Some(&first), Some(&last)) = (outer_points.first(), outer_points.last())
+        && (last - first).length() <= tol.linear
+    {
+        outer_points.pop();
+    }
+    all_points.extend_from_slice(&outer_points);
+
+    for &inner_wid in face.inner_wires() {
+        let inner_wire = topo.wire(inner_wid)?;
+        let inner_edges: Vec<_> = inner_wire.edges().to_vec();
+        for oe in &inner_edges {
+            let edge = topo.edge(oe.edge())?;
+            let start_pos = topo.vertex(edge.start())?.point();
+            let end_pos = topo.vertex(edge.end())?.point();
+            let (t0, t1) = edge.curve().domain_with_endpoints(start_pos, end_pos);
+            let n = N_BOUNDARY_SAMPLES;
+            for i in 0..=n {
+                let t = t0 + (t1 - t0) * (i as f64 / n as f64);
+                all_points.push(edge.curve().evaluate_with_endpoints(t, start_pos, end_pos));
+            }
+        }
+    }
+
+    let Some(bbox) = Aabb3::try_from_points(all_points) else {
+        return Ok(FaceContainment {
+            bbox: Aabb3 {
+                min: Point3::new(0.0, 0.0, 0.0),
+                max: Point3::new(0.0, 0.0, 0.0),
+            },
+            planar: None,
+        });
+    };
+    let diag = (bbox.max - bbox.min).length();
+
+    if let FaceSurface::Plane { normal, .. } = &surface {
+        if outer_points.len() >= 3 {
+            // Sampled chords undercut curved boundary arcs by at most the
+            // sagitta. For an arc of half-angle φ the sagitta/chord ratio is
+            // tan(φ/2)/2, which reaches 0.5 at a 180° arc, so half the chord
+            // length is a conservative bound for sub-semicircle samples.
+            // The margin keeps true near-boundary crossings accepted.
+            let margin = (max_chord * 0.5).max(tol.linear * 10.0);
+            let frame = PlaneFrame::from_normal_and_point(*normal, outer_points[0]);
+            let polygon: Vec<Point2> = outer_points.iter().map(|&p| frame.project(p)).collect();
+            return Ok(FaceContainment {
+                bbox: bbox.expanded(margin),
+                planar: Some(PlanarContainment {
+                    frame,
+                    polygon,
+                    margin,
+                }),
+            });
+        }
+        return Ok(FaceContainment {
+            bbox: bbox.expanded((diag * 0.5).max(tol.linear * 10.0)),
+            planar: None,
+        });
+    }
+
+    // Curved faces can bulge past their boundary AABB (e.g. a hemisphere
+    // bounded by its equator), so expand generously by half the diagonal.
+    Ok(FaceContainment {
+        bbox: bbox.expanded((diag * 0.5).max(tol.linear * 10.0)),
+        planar: None,
+    })
+}
+
+/// Check each edge against each face.
+#[allow(clippy::too_many_lines)]
+fn check_edge_face_pairs(
+    topo: &mut Topology,
+    edges: &[EdgeId],
+    faces: &[FaceId],
+    face_boundary_edges: &[HashSet<EdgeId>],
+    tol: Tolerance,
+    arena: &mut GfaArena,
+) -> Result<(), AlgoError> {
+    // Surface crossings are found against INFINITE surfaces; without a bounds
+    // check an edge "crosses" a face far outside its trimmed region, creating
+    // spurious paves that propagate bogus edge splits. The containment test
+    // bounds-checks every crossing against the face's sampled boundary (bbox
+    // for all faces, in-plane outer + inner-wire polygon for planar faces).
+    let mut containments = Vec::with_capacity(faces.len());
+    for &fid in faces {
+        containments.push(build_face_containment(topo, fid, tol)?);
+    }
+
+    // Pre-expand each face's containment AABB by the linear tolerance so the
+    // broad-phase reject below is conservative (never skips a real crossing,
+    // which by definition lies inside the face's boundary region).
+    let face_aabbs: Vec<Aabb3> = containments
+        .iter()
+        .map(|c| c.bbox.expanded(tol.linear))
+        .collect();
+
+    for &eid in edges {
+        // Snapshot edge data to avoid holding immutable borrow across add_vertex
+        let (curve, start_pos, end_pos, t0, t1) = {
+            let edge = topo.edge(eid)?;
+            let sp = topo.vertex(edge.start())?.point();
+            let ep = topo.vertex(edge.end())?.point();
+            let (t0, t1) = edge.curve().domain_with_endpoints(sp, ep);
+            (edge.curve().clone(), sp, ep, t0, t1)
+        };
+
+        // Broad-phase AABB for the edge, reused across all faces. The vast
+        // majority of (edge, face) pairs are spatially disjoint; testing each
+        // edge sample against every face surface (an iterative projection for
+        // curved faces) is the dominant cost in booleans on solids with many
+        // curved faces. Sampling the edge into an AABB once and rejecting
+        // disjoint faces collapses that quadratic to the pairs that actually
+        // overlap. Sampled densely enough that the inter-sample sagitta is
+        // negligible for the analytic edge curves used here.
+        let edge_aabb = {
+            let mut pts = Vec::with_capacity(N_SAMPLES + 1);
+            for i in 0..=N_SAMPLES {
+                let t = t0 + (t1 - t0) * (i as f64 / N_SAMPLES as f64);
+                pts.push(curve.evaluate_with_endpoints(t, start_pos, end_pos));
+            }
+            Aabb3::try_from_points(pts).map(|a| a.expanded(tol.linear))
+        };
+
+        for (face_idx, &fid) in faces.iter().enumerate() {
+            if face_boundary_edges[face_idx].contains(&eid) {
+                continue;
+            }
+
+            // Broad-phase: skip faces whose region cannot reach this edge.
+            if let Some(ea) = &edge_aabb
+                && !ea.intersects(face_aabbs[face_idx])
+            {
+                continue;
+            }
+
+            let face = topo.face(fid)?;
+            let surface = face.surface();
+
+            // An edge lying entirely ON the face's surface is a coincidence
+            // handled by the FF/same-domain machinery, not a set of
+            // crossings; sampling it here would emit dozens of fake paves
+            // (e.g. a cap circle lying in the opposing cap's plane).
+            let n_chk = 16;
+            let edge_on_surface = (0..=n_chk).all(|i| {
+                let t = t0 + (t1 - t0) * (f64::from(i) / f64::from(n_chk));
+                let pt = curve.evaluate_with_endpoints(t, start_pos, end_pos);
+                distance_to_surface(pt, surface) < tol.linear
+            });
+            if edge_on_surface {
+                continue;
+            }
+
+            let crossings = match surface {
+                FaceSurface::Plane { normal, d } => {
+                    find_edge_plane_crossings(&curve, start_pos, end_pos, t0, t1, *normal, *d, tol)
+                }
+                _ => find_edge_surface_crossings(&curve, start_pos, end_pos, t0, t1, surface, tol),
+            };
+
+            // Endpoint-drop windows, one per crossing and per endpoint,
+            // computed while the face's surface borrow is still live (the
+            // loop below mutates `topo`). A TANGENTIAL (grazing) contact's
+            // position along the curve is only accurate to sqrt-of-residual —
+            // an arc grazing a coplanar wall at its endpoint solves to a
+            // point microns along the arc from the true endpoint despite a
+            // ~1e-12 residual. A fixed `tol.linear` window misses that point
+            // and mints a near-duplicate vertex next to the edge's own
+            // endpoint (the gridfinity lip-corner non-manifold STL family).
+            //
+            // The widened window (tol / |tangent·normal|, capped at 1e-3)
+            // applies ONLY toward an endpoint that itself lies ON the
+            // surface: then the contact IS that endpoint's vertex-face
+            // incidence and the solver merely mislocated it. An endpoint off
+            // the surface keeps the tight `tol.linear` window — a shallow
+            // crossing near (but not at) an off-surface endpoint is genuine
+            // topology and must keep its pave (dropping those regressed the
+            // honeycomb wall-cut raw residual).
+            let on_surface = |p: Point3| distance_to_surface(p, surface) <= tol.linear;
+            let start_on_surface = on_surface(start_pos);
+            let end_on_surface = on_surface(end_pos);
+            let endpoint_windows: Vec<(f64, f64, f64)> = crossings
+                .iter()
+                .map(|&(t, pt)| {
+                    let tangent = curve.tangent_with_endpoints(t, start_pos, end_pos);
+                    let normal = match surface {
+                        FaceSurface::Plane { normal, .. } => Some(*normal),
+                        _ => surface.project_point(pt).map(|(u, v)| surface.normal(u, v)),
+                    };
+                    let sin_angle = match (tangent.normalize(), normal) {
+                        (Ok(tangent_unit), Some(n)) => tangent_unit.dot(n).abs(),
+                        _ => 1.0,
+                    };
+                    let widened = (tol.linear / sin_angle.max(1e-9)).min(1e-3);
+                    if !start_on_surface && !end_on_surface {
+                        return (tol.linear, tol.linear, widened);
+                    }
+                    (
+                        if start_on_surface {
+                            widened
+                        } else {
+                            tol.linear
+                        },
+                        if end_on_surface { widened } else { tol.linear },
+                        widened,
+                    )
+                })
+                .collect();
+
+            // Mid-edge tangential junction snap. A grazing contact solved to
+            // within the tolerance WELL (distance to the surface grows only
+            // quadratically away from a tangency, so a whole ~sqrt(2r*tol)
+            // band of the edge sits "on" the surface) lands microns from the
+            // true junction, minting a near-duplicate vertex next to an
+            // exact one that already exists in an operand (a socket outline
+            // arc ending where the outline's straight run continues along
+            // the bin wall). Snap the crossing to an existing pave vertex
+            // within the angle-scaled window when that vertex genuinely lies
+            // on BOTH the crossed surface and this edge's curve — the
+            // incidence checks are what make the widened radius safe. The
+            // pave parameter is recomputed for Line edges (exact foot);
+            // other curve types keep the tight path.
+            let snaps: Vec<Option<(brepkit_topology::vertex::VertexId, f64)>> = crossings
+                .iter()
+                .zip(&endpoint_windows)
+                .map(|(&(t, pt), &(_, _, snap_window))| {
+                    if snap_window <= tol.linear
+                        || find_nearby_vertex(topo, arena, pt, tol).is_some()
+                    {
+                        return None;
+                    }
+                    let _ = t;
+                    super::helpers::find_nearby_pave_vertex_widened(
+                        topo,
+                        arena,
+                        pt,
+                        snap_window,
+                        tol.linear,
+                        // The candidate itself must lie on the crossed surface
+                        // AND inside the face's boundary region — the solved
+                        // point passed containment, but the vertex sits up to
+                        // the window away from it.
+                        |p| {
+                            distance_to_surface(p, surface) <= tol.linear
+                                && containments[face_idx].accepts(p)
+                        },
+                    )
+                    .and_then(|vid| {
+                        let vp = topo.vertex(vid).ok()?.point();
+                        let brepkit_topology::edge::EdgeCurve::Line = &curve else {
+                            return None;
+                        };
+                        let d = end_pos - start_pos;
+                        let len_sq = d.length_squared();
+                        if len_sq < tol.linear * tol.linear {
+                            return None;
+                        }
+                        let s = ((vp - start_pos).dot(d) / len_sq).clamp(0.0, 1.0);
+                        let t_new = (t1 - t0).mul_add(s, t0);
+                        let on_curve = (curve.evaluate_with_endpoints(t_new, start_pos, end_pos)
+                            - vp)
+                            .length()
+                            <= tol.linear;
+                        on_curve.then_some((vid, t_new))
+                    })
+                })
+                .collect();
+
+            for (((t, pt), (start_window, end_window, _)), snap) in
+                crossings.into_iter().zip(endpoint_windows).zip(snaps)
+            {
+                if !containments[face_idx].accepts(pt) {
+                    log::debug!(
+                        "EF: dropping crossing of edge {eid:?} at t={t:.6} — outside face {fid:?} boundary",
+                    );
+                    continue;
+                }
+
+                // A contact at the edge's own endpoint is a vertex-face
+                // incidence (VF territory), not an edge crossing. Recording
+                // it as EF marks the adjacent pave block as lying inside the
+                // face even though the edge merely touches the face there
+                // (e.g. a cap-rim arc tangent to a coplanar wall corner).
+                if (pt - start_pos).length() <= start_window
+                    || (pt - end_pos).length() <= end_window
+                {
+                    log::debug!(
+                        "EF: dropping endpoint contact of edge {eid:?} at t={t:.6} on face {fid:?} (windows {start_window:.2e}/{end_window:.2e})",
+                    );
+                    continue;
+                }
+
+                let existing = find_nearby_vertex(topo, arena, pt, tol);
+
+                let (vertex_id, t) = if let Some(vid) = existing {
+                    (vid, t)
+                } else if let Some((vid, t_new)) = snap {
+                    log::debug!(
+                        "EF: snapping tangential crossing of edge {eid:?} at t={t:.6} to \
+                         existing vertex {vid:?} (t={t_new:.6})",
+                    );
+                    (vid, t_new)
+                } else {
+                    (topo.add_vertex(Vertex::new(pt, tol.linear)), t)
+                };
+
+                let pave = Pave::new(vertex_id, t);
+                add_pave_to_edge(arena, eid, pave);
+
+                arena.interference.ef.push(Interference::EF {
+                    edge: eid,
+                    face: fid,
+                    new_vertex: Some(vertex_id),
+                    parameter: Some(t),
+                });
+
+                arena.face_info_mut(fid).vertices_in.insert(vertex_id);
+
+                log::debug!("EF: edge {eid:?} crosses face {fid:?} at t={t:.6}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Find edge-plane crossings using algebraic ray-plane intersection.
+#[allow(clippy::too_many_arguments)]
+fn find_edge_plane_crossings(
+    curve: &EdgeCurve,
+    start_pos: Point3,
+    end_pos: Point3,
+    t0: f64,
+    t1: f64,
+    normal: Vec3,
+    d: f64,
+    tol: Tolerance,
+) -> Vec<(f64, Point3)> {
+    if matches!(curve, EdgeCurve::Line) {
+        let dir = end_pos - start_pos;
+        let denom = dir.dot(normal);
+
+        // 1e-15 checks for mathematical degeneracy (line parallel to
+        // plane), not geometric tolerance.
+        if denom.abs() < 1e-15 {
+            // Line parallel to plane — no single crossing
+            return Vec::new();
+        }
+
+        let origin_dot =
+            start_pos.x() * normal.x() + start_pos.y() * normal.y() + start_pos.z() * normal.z();
+        let s = (d - origin_dot) / denom;
+
+        // s is in [0, 1] parameterization of start..end
+        if !(-1e-7..=1.0 + 1e-7).contains(&s) {
+            return Vec::new();
+        }
+
+        let s_clamped = s.clamp(0.0, 1.0);
+        let pt = start_pos + dir * s_clamped;
+        let t = s_clamped.mul_add(t1 - t0, t0);
+        vec![(t, pt)]
+    } else {
+        find_crossings_by_sampling(
+            curve,
+            start_pos,
+            end_pos,
+            t0,
+            t1,
+            &|pt: Point3| pt.x() * normal.x() + pt.y() * normal.y() + pt.z() * normal.z() - d,
+            tol.linear,
+        )
+    }
+}
+
+/// Find edge-surface crossings by sampling signed distance and refining.
+fn find_edge_surface_crossings(
+    curve: &EdgeCurve,
+    start_pos: Point3,
+    end_pos: Point3,
+    t0: f64,
+    t1: f64,
+    surface: &FaceSurface,
+    tol: Tolerance,
+) -> Vec<(f64, Point3)> {
+    let n = N_SAMPLES;
+    let mut crossings = Vec::new();
+    let mut prev_dist = f64::MAX;
+    let mut prev_t = t0;
+
+    for i in 0..=n {
+        let t = t0 + (t1 - t0) * (i as f64 / n as f64);
+        let pt = curve.evaluate_with_endpoints(t, start_pos, end_pos);
+        let dist = distance_to_surface(pt, surface);
+
+        if i > 0 && dist < tol.linear {
+            let is_dup = crossings
+                .iter()
+                .any(|&(ct, _): &(f64, Point3)| (t - ct).abs() < (t1 - t0) / (n as f64) * 2.0);
+            if !is_dup {
+                let refined = refine_crossing(curve, start_pos, end_pos, prev_t, t, surface, tol);
+                crossings.push(refined);
+            }
+        } else if i > 0 && prev_dist > tol.linear && dist > tol.linear {
+            let mid_t = f64::midpoint(prev_t, t);
+            let mid_pt = curve.evaluate_with_endpoints(mid_t, start_pos, end_pos);
+            let mid_dist = distance_to_surface(mid_pt, surface);
+            if mid_dist < prev_dist.min(dist) && mid_dist < tol.linear * 2.0 {
+                let refined = refine_crossing(curve, start_pos, end_pos, prev_t, t, surface, tol);
+                if distance_to_surface(refined.1, surface) < tol.linear {
+                    crossings.push(refined);
+                }
+            }
+
+            // Tangent contact: near-surface sample triggers golden section minimum search
+            if prev_dist < 4.0 * tol.linear || dist < 4.0 * tol.linear {
+                let phi = 0.5 * (5.0_f64.sqrt() - 1.0);
+                let mut lo = prev_t;
+                let mut hi = t;
+                for _ in 0..30 {
+                    let m1 = hi - phi * (hi - lo);
+                    let m2 = lo + phi * (hi - lo);
+                    let d1 = distance_to_surface(
+                        curve.evaluate_with_endpoints(m1, start_pos, end_pos),
+                        surface,
+                    );
+                    let d2 = distance_to_surface(
+                        curve.evaluate_with_endpoints(m2, start_pos, end_pos),
+                        surface,
+                    );
+                    if d1 < d2 {
+                        hi = m2;
+                    } else {
+                        lo = m1;
+                    }
+                }
+                let t_min = f64::midpoint(lo, hi);
+                let pt_min = curve.evaluate_with_endpoints(t_min, start_pos, end_pos);
+                if distance_to_surface(pt_min, surface) < tol.linear {
+                    let is_dup = crossings.iter().any(|&(ct, _): &(f64, Point3)| {
+                        (t_min - ct).abs() < (t1 - t0) / (n as f64) * 2.0
+                    });
+                    if !is_dup {
+                        let refined =
+                            refine_crossing(curve, start_pos, end_pos, lo, hi, surface, tol);
+                        crossings.push(refined);
+                    }
+                }
+            }
+        }
+
+        prev_dist = dist;
+        prev_t = t;
+    }
+
+    crossings
+}
+
+/// Find crossings by sampling a signed distance function and detecting sign changes.
+fn find_crossings_by_sampling(
+    curve: &EdgeCurve,
+    start_pos: Point3,
+    end_pos: Point3,
+    t0: f64,
+    t1: f64,
+    signed_dist: &dyn Fn(Point3) -> f64,
+    tol_linear: f64,
+) -> Vec<(f64, Point3)> {
+    let n = N_SAMPLES;
+    let mut crossings = Vec::new();
+
+    let mut samples: Vec<(f64, f64)> = Vec::with_capacity(n + 1);
+    for i in 0..=n {
+        let t = t0 + (t1 - t0) * (i as f64 / n as f64);
+        let pt = curve.evaluate_with_endpoints(t, start_pos, end_pos);
+        let sd = signed_dist(pt);
+        samples.push((t, sd));
+    }
+
+    for i in 0..n {
+        let (t_a, sd_a) = samples[i];
+        let (t_b, sd_b) = samples[i + 1];
+
+        if sd_a * sd_b < 0.0 {
+            let mut lo = t_a;
+            let mut hi = t_b;
+            let mut sd_lo = sd_a;
+
+            for _ in 0..30 {
+                let mid = f64::midpoint(lo, hi);
+                let pt_mid = curve.evaluate_with_endpoints(mid, start_pos, end_pos);
+                let sd_mid = signed_dist(pt_mid);
+
+                if sd_mid * sd_lo < 0.0 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                    sd_lo = sd_mid;
+                }
+            }
+
+            let t = f64::midpoint(lo, hi);
+            let pt = curve.evaluate_with_endpoints(t, start_pos, end_pos);
+            crossings.push((t, pt));
+        }
+        // Tangent contact: minimum approaches zero without sign change
+        else if sd_a.abs() < 4.0 * tol_linear || sd_b.abs() < 4.0 * tol_linear {
+            let phi = 0.5 * (5.0_f64.sqrt() - 1.0);
+            let mut lo = t_a;
+            let mut hi = t_b;
+            for _ in 0..30 {
+                let m1 = hi - phi * (hi - lo);
+                let m2 = lo + phi * (hi - lo);
+                let d1 = signed_dist(curve.evaluate_with_endpoints(m1, start_pos, end_pos)).abs();
+                let d2 = signed_dist(curve.evaluate_with_endpoints(m2, start_pos, end_pos)).abs();
+                if d1 < d2 {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            let t_min = f64::midpoint(lo, hi);
+            let pt_min = curve.evaluate_with_endpoints(t_min, start_pos, end_pos);
+            let d_min = signed_dist(pt_min).abs();
+            if d_min < tol_linear {
+                let is_dup = crossings.iter().any(|&(ct, _): &(f64, Point3)| {
+                    (t_min - ct).abs() < (t1 - t0) / (n as f64) * 2.0
+                });
+                if !is_dup {
+                    crossings.push((t_min, pt_min));
+                }
+            }
+        }
+    }
+
+    crossings
+}
+
+/// Compute distance from point to surface.
+fn distance_to_surface(pt: Point3, surface: &FaceSurface) -> f64 {
+    if let FaceSurface::Plane { normal, d } = surface {
+        (pt.x() * normal.x() + pt.y() * normal.y() + pt.z() * normal.z() - d).abs()
+    } else if let Some((u, v)) = surface.project_point(pt) {
+        if let Some(surf_pt) = surface.evaluate(u, v) {
+            (pt - surf_pt).length()
+        } else {
+            f64::MAX
+        }
+    } else {
+        f64::MAX
+    }
+}
+
+/// Refine a crossing between two parameter values using ternary search.
+fn refine_crossing(
+    curve: &EdgeCurve,
+    start_pos: Point3,
+    end_pos: Point3,
+    t_lo: f64,
+    t_hi: f64,
+    surface: &FaceSurface,
+    _tol: Tolerance,
+) -> (f64, Point3) {
+    let mut lo = t_lo;
+    let mut hi = t_hi;
+
+    for _ in 0..30 {
+        let m1 = lo + (hi - lo) / 3.0;
+        let m2 = hi - (hi - lo) / 3.0;
+        let d1 = distance_to_surface(
+            curve.evaluate_with_endpoints(m1, start_pos, end_pos),
+            surface,
+        );
+        let d2 = distance_to_surface(
+            curve.evaluate_with_endpoints(m2, start_pos, end_pos),
+            surface,
+        );
+        if d1 < d2 {
+            hi = m2;
+        } else {
+            lo = m1;
+        }
+    }
+
+    let t = f64::midpoint(lo, hi);
+    let pt = curve.evaluate_with_endpoints(t, start_pos, end_pos);
+    (t, pt)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use brepkit_math::vec::Point3;
+    use brepkit_topology::edge::EdgeCurve;
+
+    #[test]
+    fn sampling_detects_tangent_touch() {
+        // Signed distance: parabola touching zero at t=0.5 (exact tangent)
+        let curve = EdgeCurve::Line;
+        let start = Point3::new(0.0, 0.0, 0.0);
+        let end = Point3::new(1.0, 0.0, 0.0);
+        let signed_dist = |pt: Point3| -> f64 {
+            let t = pt.x();
+            (t - 0.5) * (t - 0.5) // minimum = 0 at t=0.5
+        };
+
+        let crossings =
+            find_crossings_by_sampling(&curve, start, end, 0.0, 1.0, &signed_dist, 1e-7);
+
+        assert!(
+            !crossings.is_empty(),
+            "tangent touch (minimum=0) should be detected"
+        );
+        let (t, _) = crossings[0];
+        assert!(
+            (t - 0.5).abs() < 0.02,
+            "tangent point should be near t=0.5, got {t}"
+        );
+    }
+}
