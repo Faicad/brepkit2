@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790767511462,
+  "lastUpdate": 1790768462759,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -215,6 +215,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 20869876,
             "range": "± 467601",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com",
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "yuan",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "16b732c31fe35494f9cfa518fe8c484a3c94178e",
+          "message": "chore(deps-dev): bump the npm group across 1 directory with 5 updates\n\nBumps the npm group with 5 updates in the / directory:\n\n| Package | From | To |\n| --- | --- | --- |\n| [@commitlint/cli](https://github.com/conventional-changelog/commitlint/tree/HEAD/@commitlint/cli) | `21.2.1` | `21.2.3` |\n| [@commitlint/config-conventional](https://github.com/conventional-changelog/commitlint/tree/HEAD/@commitlint/config-conventional) | `21.2.0` | `21.2.3` |\n| [jsdom](https://github.com/jsdom/jsdom) | `29.1.1` | `30.0.1` |\n| [prettier](https://github.com/prettier/prettier) | `3.9.6` | `3.9.9` |\n| [typescript](https://github.com/microsoft/TypeScript) | `5.9.3` | `7.0.2` |\n\n\n\nUpdates `@commitlint/cli` from 21.2.1 to 21.2.3\n- [Release notes](https://github.com/conventional-changelog/commitlint/releases)\n- [Changelog](https://github.com/conventional-changelog/commitlint/blob/master/@commitlint/cli/CHANGELOG.md)\n- [Commits](https://github.com/conventional-changelog/commitlint/commits/v21.2.3/@commitlint/cli)\n\nUpdates `@commitlint/config-conventional` from 21.2.0 to 21.2.3\n- [Release notes](https://github.com/conventional-changelog/commitlint/releases)\n- [Changelog](https://github.com/conventional-changelog/commitlint/blob/master/@commitlint/config-conventional/CHANGELOG.md)\n- [Commits](https://github.com/conventional-changelog/commitlint/commits/v21.2.3/@commitlint/config-conventional)\n\nUpdates `jsdom` from 29.1.1 to 30.0.1\n- [Release notes](https://github.com/jsdom/jsdom/releases)\n- [Commits](https://github.com/jsdom/jsdom/compare/v29.1.1...v30.0.1)\n\nUpdates `prettier` from 3.9.6 to 3.9.9\n- [Release notes](https://github.com/prettier/prettier/releases)\n- [Changelog](https://github.com/prettier/prettier/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/prettier/prettier/compare/3.9.6...3.9.9)\n\nUpdates `typescript` from 5.9.3 to 7.0.2\n- [Release notes](https://github.com/microsoft/TypeScript/releases)\n- [Commits](https://github.com/microsoft/TypeScript/compare/v5.9.3...v7.0.2)\n\n---\nupdated-dependencies:\n- dependency-name: \"@commitlint/cli\"\n  dependency-version: 21.2.3\n  dependency-type: direct:development\n  update-type: version-update:semver-patch\n  dependency-group: npm\n- dependency-name: \"@commitlint/config-conventional\"\n  dependency-version: 21.2.3\n  dependency-type: direct:development\n  update-type: version-update:semver-patch\n  dependency-group: npm\n- dependency-name: jsdom\n  dependency-version: 30.0.1\n  dependency-type: direct:development\n  update-type: version-update:semver-major\n  dependency-group: npm\n- dependency-name: prettier\n  dependency-version: 3.9.9\n  dependency-type: direct:development\n  update-type: version-update:semver-patch\n  dependency-group: npm\n- dependency-name: typescript\n  dependency-version: 7.0.2\n  dependency-type: direct:development\n  update-type: version-update:semver-major\n  dependency-group: npm\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>",
+          "timestamp": "2026-09-30T19:38:40+08:00",
+          "tree_id": "074d5ab08db9a9ea1e7f8f10e4ded2a507244976",
+          "url": "https://github.com/Faicad/brepkit2/commit/16b732c31fe35494f9cfa518fe8c484a3c94178e"
+        },
+        "date": 1790768461697,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 1029023,
+            "range": "± 1557",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1076984,
+            "range": "± 2616",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 12890,
+            "range": "± 305",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 714342,
+            "range": "± 4761",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 26126893,
+            "range": "± 757624",
             "unit": "ns/iter"
           }
         ]
