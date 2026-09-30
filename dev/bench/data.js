@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790770928346,
+  "lastUpdate": 1790771447190,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -431,6 +431,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24945648,
             "range": "± 44326",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "e442bd3f0fe8ba43552daf92ff8c6b8135d12f3b",
+          "message": "fix(security): override lodash-es to ^4.18.1 for chevrotain chain\n\nchevrotain 11.1.2 (pinned by mermaid 12) hard-depends on\nlodash-es 4.17.23, which has GHSA-f23m-r3pf-42rh and\nGHSA-r5fr-rjxr-66jc. The devDependency bump alone did not dedupe it;\nadd an npm override so the whole tree resolves to 4.18.1.",
+          "timestamp": "2026-09-30T20:27:07+08:00",
+          "tree_id": "abeb424afc0095e9da41306f03709b5578c06073",
+          "url": "https://github.com/Faicad/brepkit2/commit/e442bd3f0fe8ba43552daf92ff8c6b8135d12f3b"
+        },
+        "date": 1790771446542,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 920433,
+            "range": "± 15561",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1001672,
+            "range": "± 25129",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11355,
+            "range": "± 250",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 685577,
+            "range": "± 15017",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24798131,
+            "range": "± 181854",
             "unit": "ns/iter"
           }
         ]
