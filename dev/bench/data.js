@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790769907243,
+  "lastUpdate": 1790770928346,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -377,6 +377,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 26464786,
             "range": "± 122350",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "f8f9b569216109fa8335ad4ecf5b1016561a40ec",
+          "message": "fix(security): bump lodash-es to 4.18.1 and allowlist unmaintained ttf-parser\n\n- lodash-es 4.17.23 had two advisories (GHSA-f23m-r3pf-42rh,\n  GHSA-r5fr-rjxr-66jc), fixed in 4.18.0; pin ^4.18.1 in devDependencies\n  so chevrotain/mermaid resolve the patched copy.\n- RUSTSEC-2026-0192 (ttf-parser unmaintained) has no fixed version; the\n  crate is only reachable via winit -> sctk-adwaita -> ab_glyph behind\n  brepkit-render's window feature and never parses untrusted input, so\n  allowlist it in deny.toml until upstream moves to skrifa.",
+          "timestamp": "2026-09-30T20:16:25+08:00",
+          "tree_id": "82bf36585853a81dfa49af2b0a80374ff2a29ae0",
+          "url": "https://github.com/Faicad/brepkit2/commit/f8f9b569216109fa8335ad4ecf5b1016561a40ec"
+        },
+        "date": 1790770927751,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 949208,
+            "range": "± 20523",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1033299,
+            "range": "± 1963",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11975,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 702610,
+            "range": "± 10234",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24945648,
+            "range": "± 44326",
             "unit": "ns/iter"
           }
         ]
