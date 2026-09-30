@@ -45,7 +45,11 @@ jobs:
         # that the `cargo` parser in `publish` understands; build noise stays on
         # stderr. `pipefail` so a bench failure fails the step despite the `tee`
         # (the default `bash -e` shell does NOT set it).
+        # Drop criterion state restored by rust-cache: a partially cached
+        # baseline makes criterion emit "Failed to access base/sample.json"
+        # ERROR lines that corrupt the bencher output parsed by `publish`.
         run: |
+          rm -rf target/criterion
           set -o pipefail
           cargo bench -p brepkit-operations --bench boolean_tracking -- --output-format bencher | tee bench-output.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
