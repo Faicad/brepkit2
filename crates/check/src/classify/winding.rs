@@ -28,8 +28,14 @@ use crate::CheckError;
 /// references.
 pub fn winding_number(topo: &Topology, solid: SolidId, point: Point3) -> Result<f64, CheckError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
-    let faces = shell.faces().to_vec();
+    // Cavity (inner) shells bound the solid as much as the outer shell does;
+    // ignoring them puts every point in a void inside the material.
+    let mut faces: Vec<FaceId> = Vec::new();
+    for shell_id in
+        std::iter::once(solid_data.outer_shell()).chain(solid_data.inner_shells().iter().copied())
+    {
+        faces.extend_from_slice(topo.shell(shell_id)?.faces());
+    }
 
     let mut total = 0.0;
     for fid in &faces {
@@ -50,19 +56,36 @@ fn face_winding_contribution(
     point: Point3,
 ) -> Result<f64, CheckError> {
     let reversed = topo.face(face_id)?.is_reversed();
-    let polygon = crate::util::face_polygon(topo, face_id)?;
-
-    if polygon.len() < 3 {
+    let loops = crate::util::face_boundary_loops(topo, face_id)?;
+    let Some(outer) = loops.first() else {
         return Ok(0.0);
+    };
+
+    // Holes remove area from the face, so their fan contributions are
+    // subtracted from the outer loop's.
+    let mut contribution = fan_contribution(outer, point);
+    for hole in &loops[1..] {
+        contribution -= fan_contribution(hole, point);
     }
 
+    Ok(if reversed {
+        -contribution
+    } else {
+        contribution
+    })
+}
+
+/// Signed solid angle of a single boundary loop, fan-triangulated from its
+/// first vertex.
+fn fan_contribution(polygon: &[Point3], point: Point3) -> f64 {
+    if polygon.len() < 3 {
+        return 0.0;
+    }
     let mut contribution = 0.0;
     for i in 1..polygon.len() - 1 {
-        let omega = solid_angle(point, polygon[0], polygon[i], polygon[i + 1]);
-        contribution += if reversed { -omega } else { omega };
+        contribution += solid_angle(point, polygon[0], polygon[i], polygon[i + 1]);
     }
-
-    Ok(contribution)
+    contribution
 }
 
 /// Compute the signed solid angle subtended by triangle (a, b, c) at point p.

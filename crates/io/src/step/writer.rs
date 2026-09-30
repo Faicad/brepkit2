@@ -356,15 +356,31 @@ impl StepWriteContext {
         let vals_str: Vec<String> = knot_vals.iter().map(|v| fmt_f64(*v)).collect();
 
         let id = self.next_id();
-        let _ = writeln!(
-            self.entities,
-            "#{id} = B_SPLINE_CURVE_WITH_KNOTS('', {}, ({}), \
-             .UNSPECIFIED., .F., .F., ({}), ({}), .UNSPECIFIED.);",
-            nurbs.degree(),
-            cp_refs.join(", "),
-            mults_str.join(", "),
-            vals_str.join(", "),
-        );
+        if let Some(w_str) = rational_weight_list(nurbs.weights()) {
+            // A rational curve (an exact arc, say) only stays exact if the
+            // weights travel with it — writing it as a plain
+            // B_SPLINE_CURVE_WITH_KNOTS silently de-rationalises the geometry.
+            let _ = writeln!(
+                self.entities,
+                "#{id} = ( RATIONAL_B_SPLINE_CURVE(({w_str})) \
+                 B_SPLINE_CURVE_WITH_KNOTS('', {}, ({}), \
+                 .UNSPECIFIED., .F., .F., ({}), ({}), .UNSPECIFIED.) );",
+                nurbs.degree(),
+                cp_refs.join(", "),
+                mults_str.join(", "),
+                vals_str.join(", "),
+            );
+        } else {
+            let _ = writeln!(
+                self.entities,
+                "#{id} = B_SPLINE_CURVE_WITH_KNOTS('', {}, ({}), \
+                 .UNSPECIFIED., .F., .F., ({}), ({}), .UNSPECIFIED.);",
+                nurbs.degree(),
+                cp_refs.join(", "),
+                mults_str.join(", "),
+                vals_str.join(", "),
+            );
+        }
 
         id
     }
@@ -524,18 +540,34 @@ impl StepWriteContext {
         let v_vals_str: Vec<String> = v_vals.iter().map(|v| fmt_f64(*v)).collect();
 
         let id = self.next_id();
-        let _ = writeln!(
-            self.entities,
-            "#{id} = B_SPLINE_SURFACE_WITH_KNOTS('', {}, {}, ({}), \
-             .UNSPECIFIED., .F., .F., .F., ({}), ({}), ({}), ({}), .UNSPECIFIED.);",
-            nurbs.degree_u(),
-            nurbs.degree_v(),
-            cp_grid_refs.join(", "),
-            u_mults_str.join(", "),
-            v_mults_str.join(", "),
-            u_vals_str.join(", "),
-            v_vals_str.join(", "),
-        );
+        if let Some(w_str) = rational_weight_grid(nurbs.weights()) {
+            let _ = writeln!(
+                self.entities,
+                "#{id} = ( RATIONAL_B_SPLINE_SURFACE(({w_str})) \
+                 B_SPLINE_SURFACE_WITH_KNOTS('', {}, {}, ({}), \
+                 .UNSPECIFIED., .F., .F., .F., ({}), ({}), ({}), ({}), .UNSPECIFIED.) );",
+                nurbs.degree_u(),
+                nurbs.degree_v(),
+                cp_grid_refs.join(", "),
+                u_mults_str.join(", "),
+                v_mults_str.join(", "),
+                u_vals_str.join(", "),
+                v_vals_str.join(", "),
+            );
+        } else {
+            let _ = writeln!(
+                self.entities,
+                "#{id} = B_SPLINE_SURFACE_WITH_KNOTS('', {}, {}, ({}), \
+                 .UNSPECIFIED., .F., .F., .F., ({}), ({}), ({}), ({}), .UNSPECIFIED.);",
+                nurbs.degree_u(),
+                nurbs.degree_v(),
+                cp_grid_refs.join(", "),
+                u_mults_str.join(", "),
+                v_mults_str.join(", "),
+                u_vals_str.join(", "),
+                v_vals_str.join(", "),
+            );
+        }
 
         Ok(id)
     }
@@ -600,6 +632,52 @@ fn fmt_f64(v: f64) -> String {
     } else {
         format!("{v:.15E}")
     }
+}
+
+/// Tolerance for "this weight is not 1.0", i.e. the curve/surface is rational.
+const WEIGHT_IS_ONE_EPS: f64 = 1e-12;
+
+/// Render a rational curve's weights as a STEP list, or `None` when every
+/// weight is 1.0 (a non-rational B-spline, which needs no rational wrapper).
+fn rational_weight_list(weights: &[f64]) -> Option<String> {
+    let rational = weights.iter().any(|w| (w - 1.0).abs() > WEIGHT_IS_ONE_EPS);
+    if !rational {
+        return None;
+    }
+    Some(
+        weights
+            .iter()
+            .map(|w| fmt_f64(*w))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// Render a rational surface's weight grid as nested STEP lists, or `None`
+/// when every weight is 1.0.
+fn rational_weight_grid(weights: &[Vec<f64>]) -> Option<String> {
+    let rational = weights
+        .iter()
+        .flat_map(|row| row.iter())
+        .any(|w| (w - 1.0).abs() > WEIGHT_IS_ONE_EPS);
+    if !rational {
+        return None;
+    }
+    Some(
+        weights
+            .iter()
+            .map(|row| {
+                format!(
+                    "({})",
+                    row.iter()
+                        .map(|w| fmt_f64(*w))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 /// Compute a reference direction perpendicular to the given normal.

@@ -157,14 +157,27 @@ fn expand_aabb_for_face(
         // for fillet cylinders), this uses the face's own vertices to
         // constrain the expansion to the actual face extent.
         FaceSurface::Cylinder(c) => {
-            expand_cylinder_at_vertices(topo, aabb, face_id, c);
+            let c = c.clone();
+            expand_trimmed_revolution(
+                topo,
+                aabb,
+                face_id,
+                |p| c.project_point(p),
+                |u, v| c.evaluate(u, v),
+            );
         }
 
-        // Cone: expand radially at each face vertex (the radius varies per
-        // axial position). Uses the vertex's own distance-from-axis as the
-        // local radius, then projects to a full circle at that axial slice.
+        // Cone: same treatment — the trimming edges bound both the angular
+        // sweep and the axial (radius-varying) extent.
         FaceSurface::Cone(c) => {
-            expand_cone_at_vertices(topo, aabb, face_id, c);
+            let c = c.clone();
+            expand_trimmed_revolution(
+                topo,
+                aabb,
+                face_id,
+                |p| c.project_point(p),
+                |u, v| c.evaluate(u, v),
+            );
         }
 
         // NURBS: sample the surface at a sparse interior grid.
@@ -226,107 +239,235 @@ fn sample_face_wire_midpoints(
     has_curved
 }
 
-/// Expand AABB for a cylinder face by projecting each vertex onto the
-/// cylinder axis and adding the full radial extent at that axial position.
-fn expand_cylinder_at_vertices(
-    topo: &Topology,
-    aabb: &mut Aabb3,
-    face_id: brepkit_topology::face::FaceId,
-    cyl: &brepkit_math::surfaces::CylindricalSurface,
-) {
+/// Angular samples used when a revolution patch's trimming carries no usable
+/// angular span (a full sweep, or a degenerate boundary).
+const FULL_RING_SAMPLES: usize = 32;
+
+/// Shortest distance between two angles on a circle of the given period.
+fn wrap_dist(a: f64, b: f64, period: f64) -> f64 {
+    let d = (a - b).rem_euclid(period);
+    if d > period * 0.5 { period - d } else { d }
+}
+
+/// The contiguous angular span covered by `angles`, as `(centre, half-width)`,
+/// measured in the same units as the angles.
+///
+/// Returns `None` when the angles cancel out — the samples are spread over
+/// the whole period, so no narrower span can be inferred.
+fn circular_span(angles: &[f64], period: f64) -> Option<(f64, f64)> {
+    let tau = std::f64::consts::TAU;
+    let (sx, sy) = angles.iter().fold((0.0, 0.0), |(x, y), &a| {
+        let t = tau * a / period;
+        (x + t.cos(), y + t.sin())
+    });
+    if sx.hypot(sy) < 1e-12 {
+        return None;
+    }
+    let mu = sy.atan2(sx).rem_euclid(tau) * period / tau;
+    let mut half = 0.0_f64;
+    for &a in angles {
+        half = half.max(wrap_dist(a, mu, period));
+    }
+    Some((mu, half))
+}
+
+/// Every sampled point of a face's trimming boundary: the endpoints of each
+/// edge plus interior samples of the curved ones.
+fn face_boundary_samples(topo: &Topology, face_id: FaceId) -> Vec<Point3> {
+    use brepkit_topology::edge::EdgeCurve;
+
+    let mut pts = Vec::new();
     let Ok(face) = topo.face(face_id) else {
-        return;
+        return pts;
     };
-    let Ok(wire) = topo.wire(face.outer_wire()) else {
-        return;
-    };
-    let axis = cyl.axis();
-    let origin = cyl.origin();
-    let r = cyl.radius();
-    let rx = r * (1.0 - axis.x() * axis.x()).max(0.0).sqrt();
-    let ry = r * (1.0 - axis.y() * axis.y()).max(0.0).sqrt();
-    let rz = r * (1.0 - axis.z() * axis.z()).max(0.0).sqrt();
-    for oe in wire.edges() {
-        let Ok(edge) = topo.edge(oe.edge()) else {
+    for wid in std::iter::once(face.outer_wire()).chain(face.inner_wires().iter().copied()) {
+        let Ok(wire) = topo.wire(wid) else {
             continue;
         };
-        for vid in [edge.start(), edge.end()] {
-            let Ok(v) = topo.vertex(vid) else {
+        for oe in wire.edges() {
+            let Ok(edge) = topo.edge(oe.edge()) else {
                 continue;
             };
-            let rel = brepkit_math::vec::Vec3::new(
-                v.point().x() - origin.x(),
-                v.point().y() - origin.y(),
-                v.point().z() - origin.z(),
-            );
-            let t = axis.dot(rel);
-            let coa = Point3::new(
-                origin.x() + axis.x() * t,
-                origin.y() + axis.y() * t,
-                origin.z() + axis.z() * t,
-            );
-            aabb_include(aabb, Point3::new(coa.x() - rx, coa.y() - ry, coa.z() - rz));
-            aabb_include(aabb, Point3::new(coa.x() + rx, coa.y() + ry, coa.z() + rz));
+            let (Ok(sv), Ok(ev)) = (topo.vertex(edge.start()), topo.vertex(edge.end())) else {
+                continue;
+            };
+            let p0 = sv.point();
+            let p1 = ev.point();
+            pts.push(p0);
+            pts.push(p1);
+            if !matches!(edge.curve(), EdgeCurve::Line) {
+                let (t0, t1) = edge.curve().domain_with_endpoints(p0, p1);
+                for &frac in &[0.25, 0.5, 0.75] {
+                    pts.push(
+                        edge.curve()
+                            .evaluate_with_endpoints(t0 + (t1 - t0) * frac, p0, p1),
+                    );
+                }
+            }
         }
+    }
+    pts
+}
+
+/// Expand the AABB for a trimmed surface of revolution (cylinder or cone).
+///
+/// The patch's extremes along each axis are attained either on the trimming
+/// boundary (already sampled) or at an interior critical angle — one of the
+/// four cardinal directions, provided that direction lies inside the patch's
+/// angular sweep. Adding a full ring at every boundary vertex instead (the
+/// previous behaviour) claims the whole untrimmed surface, so a quarter-turn
+/// fillet patch reports the complete cylinder's box.
+fn expand_trimmed_revolution<F, G>(
+    topo: &Topology,
+    aabb: &mut Aabb3,
+    face_id: FaceId,
+    project: F,
+    evaluate: G,
+) where
+    F: Fn(Point3) -> (f64, f64),
+    G: Fn(f64, f64) -> Point3,
+{
+    let samples = face_boundary_samples(topo, face_id);
+    if samples.len() < 2 {
+        return;
+    }
+
+    let period = std::f64::consts::TAU;
+    let mut us = Vec::with_capacity(samples.len());
+    let mut vs = Vec::with_capacity(samples.len());
+    for &p in &samples {
+        let (u, v) = project(p);
+        us.push(u);
+        vs.push(v);
+    }
+    let v_min = vs.iter().copied().fold(f64::INFINITY, f64::min);
+    let v_max = vs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+    let mut u_candidates: Vec<f64> = Vec::new();
+    match circular_span(&us, period) {
+        Some((mu, half)) if half < period * 0.5 - 1e-9 => {
+            u_candidates.push(mu - half);
+            u_candidates.push(mu + half);
+            // Interior extrema: a cardinal direction the sweep actually
+            // passes through.
+            for k in 0..4 {
+                let cardinal = period * (k as f64) / 4.0;
+                if wrap_dist(cardinal, mu, period) <= half + 1e-9 {
+                    u_candidates.push(cardinal);
+                }
+            }
+        }
+        // Full sweep (or not enough information to narrow it): keep the box
+        // conservative by sampling the whole ring.
+        _ =>
+        {
+            #[allow(clippy::cast_precision_loss)]
+            for i in 0..FULL_RING_SAMPLES {
+                u_candidates.push(period * (i as f64) / (FULL_RING_SAMPLES as f64));
+            }
+        }
+    }
+
+    for u in u_candidates {
+        aabb_include(aabb, evaluate(u, v_min));
+        aabb_include(aabb, evaluate(u, v_max));
     }
 }
 
-/// Expand AABB for a cone face by computing each face vertex's radial
-/// distance from the axis (the local cone radius at that axial slice),
-/// then including a full circle of that radius at that slice.
-fn expand_cone_at_vertices(
-    topo: &Topology,
-    aabb: &mut Aabb3,
-    face_id: brepkit_topology::face::FaceId,
-    cone: &brepkit_math::surfaces::ConicalSurface,
-) {
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use brepkit_math::curves::Circle3D;
+    use brepkit_math::surfaces::CylindricalSurface;
     use brepkit_math::vec::Vec3;
-    let Ok(face) = topo.face(face_id) else {
-        return;
-    };
-    let Ok(wire) = topo.wire(face.outer_wire()) else {
-        return;
-    };
-    let axis = cone.axis();
-    let apex = cone.apex();
-    // Axis-perpendicular projection scales for a full ring at slice centre.
-    let sx = (1.0 - axis.x() * axis.x()).max(0.0).sqrt();
-    let sy = (1.0 - axis.y() * axis.y()).max(0.0).sqrt();
-    let sz = (1.0 - axis.z() * axis.z()).max(0.0).sqrt();
-    for oe in wire.edges() {
-        let Ok(edge) = topo.edge(oe.edge()) else {
-            continue;
+    use brepkit_topology::edge::{Edge, EdgeCurve};
+    use brepkit_topology::face::Face;
+    use brepkit_topology::vertex::Vertex;
+    use brepkit_topology::wire::{OrientedEdge, Wire};
+
+    use super::*;
+
+    /// A cylinder patch of radius 1 about the z-axis, trimmed to the quarter
+    /// sweep `θ ∈ [0°, 90°]` over `z ∈ [0, 1]`.
+    ///
+    /// Its true AABB is `[0,1] × [0,1] × [0,1]` — the patch never reaches
+    /// negative x or y, even though the *untrimmed* cylinder does.
+    fn quarter_cylinder_face(topo: &mut Topology) -> FaceId {
+        let cyl =
+            CylindricalSurface::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 1.0)
+                .expect("cylinder");
+        let circle = Circle3D::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 1.0)
+            .expect("circle");
+
+        let v = |topo: &mut Topology, x: f64, y: f64, z: f64| {
+            topo.add_vertex(Vertex::new(Point3::new(x, y, z), 1e-7))
         };
-        for vid in [edge.start(), edge.end()] {
-            let Ok(v) = topo.vertex(vid) else {
-                continue;
-            };
-            let rel = Vec3::new(
-                v.point().x() - apex.x(),
-                v.point().y() - apex.y(),
-                v.point().z() - apex.z(),
-            );
-            let t = axis.dot(rel);
-            let coa = Point3::new(
-                apex.x() + axis.x() * t,
-                apex.y() + axis.y() * t,
-                apex.z() + axis.z() * t,
-            );
-            // Local radius is the perpendicular distance from axis to vertex.
-            let perp = Vec3::new(
-                rel.x() - axis.x() * t,
-                rel.y() - axis.y() * t,
-                rel.z() - axis.z() * t,
-            );
-            let r = perp.length();
-            aabb_include(
-                aabb,
-                Point3::new(coa.x() - r * sx, coa.y() - r * sy, coa.z() - r * sz),
-            );
-            aabb_include(
-                aabb,
-                Point3::new(coa.x() + r * sx, coa.y() + r * sy, coa.z() + r * sz),
-            );
-        }
+        let a = v(topo, 1.0, 0.0, 0.0); // θ = 0°, z = 0
+        let b = v(topo, 0.0, 1.0, 0.0); // θ = 90°, z = 0
+        let c = v(topo, 0.0, 1.0, 1.0); // θ = 90°, z = 1
+        let d = v(topo, 1.0, 0.0, 1.0); // θ = 0°, z = 1
+
+        // Loop A→B→C→D→A. The top rim is stored as D→C and traversed
+        // reversed, so both arcs are the *short* 90° sweep (storing it as
+        // C→D would make the parameterisation run the long way round).
+        let bottom_arc = topo.add_edge(Edge::new(a, b, EdgeCurve::Circle(circle.clone())));
+        let right = topo.add_edge(Edge::new(b, c, EdgeCurve::Line));
+        let top_arc = topo.add_edge(Edge::new(d, c, EdgeCurve::Circle(circle)));
+        let left = topo.add_edge(Edge::new(d, a, EdgeCurve::Line));
+
+        let wire = topo.add_wire(
+            Wire::new(
+                vec![
+                    OrientedEdge::new(bottom_arc, true),
+                    OrientedEdge::new(right, true),
+                    OrientedEdge::new(top_arc, false),
+                    OrientedEdge::new(left, true),
+                ],
+                true,
+            )
+            .expect("wire"),
+        );
+        topo.add_face(Face::new(wire, vec![], FaceSurface::Cylinder(cyl)))
+    }
+
+    /// E-02: a trimmed cylinder's bounding box follows the trimming edges,
+    /// not the full analytic surface.
+    #[test]
+    fn trimmed_cylinder_bbox_respects_arc_bounds() {
+        let mut topo = Topology::new();
+        let face = quarter_cylinder_face(&mut topo);
+
+        let aabb = face_set_bounding_box(&topo, &[face]).expect("bbox");
+        let slack = 1e-6;
+
+        assert!(
+            aabb.min.x() >= -slack,
+            "min.x reached into the unswept quadrant: {}",
+            aabb.min.x()
+        );
+        assert!(
+            aabb.min.y() >= -slack,
+            "min.y reached into the unswept quadrant: {}",
+            aabb.min.y()
+        );
+        // Conservative in the other direction: the patch really does span
+        // x,y ∈ [0,1] and z ∈ [0,1].
+        assert!(
+            aabb.max.x() >= 1.0 - slack,
+            "max.x too tight: {}",
+            aabb.max.x()
+        );
+        assert!(
+            aabb.max.y() >= 1.0 - slack,
+            "max.y too tight: {}",
+            aabb.max.y()
+        );
+        assert!(
+            aabb.max.z() >= 1.0 - slack,
+            "max.z too tight: {}",
+            aabb.max.z()
+        );
+        assert!(aabb.min.z() <= slack, "min.z too tight: {}", aabb.min.z());
     }
 }

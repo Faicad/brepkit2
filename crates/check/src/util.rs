@@ -86,6 +86,30 @@ pub fn face_polygon(topo: &Topology, face_id: FaceId) -> Result<Vec<Point3>, Che
     wire_polygon(topo, face.outer_wire())
 }
 
+/// Build every boundary loop of a face: the outer loop first, then one loop
+/// per hole (`inner_wires`).
+///
+/// A face's material excludes its holes, so containment tests must accept a
+/// point that is inside the outer loop *and* outside every hole loop. Using
+/// only [`face_polygon`] treats a hole as material — a ray passing through a
+/// bored hole then counts a crossing that does not exist.
+///
+/// # Errors
+///
+/// Returns an error if any topology entity referenced by the face is missing.
+pub fn face_boundary_loops(
+    topo: &Topology,
+    face_id: FaceId,
+) -> Result<Vec<Vec<Point3>>, CheckError> {
+    let face = topo.face(face_id)?;
+    let mut loops = Vec::with_capacity(1 + face.inner_wires().len());
+    loops.push(wire_polygon(topo, face.outer_wire())?);
+    for &iw in face.inner_wires() {
+        loops.push(wire_polygon(topo, iw)?);
+    }
+    Ok(loops)
+}
+
 /// Build a polygon from a wire by sampling vertex positions and closed-edge
 /// curves.
 ///

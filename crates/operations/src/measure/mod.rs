@@ -24,6 +24,151 @@ mod tests {
     use brepkit_topology::face::FaceSurface;
     use brepkit_topology::test_utils::make_unit_cube_non_manifold;
 
+    /// An axis-aligned cube shell of edge `size` at `(ox, oy, oz)`.
+    ///
+    /// `reversed` builds the inward-facing sense a cavity (inner) shell needs.
+    #[allow(clippy::too_many_lines)]
+    fn cube_shell(
+        topo: &mut Topology,
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        size: f64,
+        reversed: bool,
+    ) -> brepkit_topology::shell::ShellId {
+        /// One cube face: its four wire edges (index, forward), plane normal
+        /// components and plane offset.
+        type CubeFaceSpec = ([(usize, bool); 4], [f64; 3], f64);
+
+        use brepkit_math::vec::Point3;
+        use brepkit_topology::edge::{Edge, EdgeCurve};
+        use brepkit_topology::face::Face;
+        use brepkit_topology::shell::Shell;
+        use brepkit_topology::vertex::Vertex;
+        use brepkit_topology::wire::{OrientedEdge, Wire};
+
+        let c =
+            |bx: f64, by: f64, bz: f64| Point3::new(ox + bx * size, oy + by * size, oz + bz * size);
+        let v: Vec<_> = [
+            c(0.0, 0.0, 0.0),
+            c(1.0, 0.0, 0.0),
+            c(1.0, 1.0, 0.0),
+            c(0.0, 1.0, 0.0),
+            c(0.0, 0.0, 1.0),
+            c(1.0, 0.0, 1.0),
+            c(1.0, 1.0, 1.0),
+            c(0.0, 1.0, 1.0),
+        ]
+        .iter()
+        .map(|&p| topo.add_vertex(Vertex::new(p, 1e-7)))
+        .collect();
+
+        let e: Vec<_> = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ]
+        .iter()
+        .map(|&(a, b)| topo.add_edge(Edge::new(v[a], v[b], EdgeCurve::Line)))
+        .collect();
+
+        let specs: [CubeFaceSpec; 6] = [
+            (
+                [(0, false), (3, false), (2, false), (1, false)],
+                [0.0, 0.0, -1.0],
+                -oz,
+            ),
+            (
+                [(4, true), (5, true), (6, true), (7, true)],
+                [0.0, 0.0, 1.0],
+                oz + size,
+            ),
+            (
+                [(0, true), (9, true), (4, false), (8, false)],
+                [0.0, -1.0, 0.0],
+                -oy,
+            ),
+            (
+                [(2, true), (11, true), (6, false), (10, false)],
+                [0.0, 1.0, 0.0],
+                oy + size,
+            ),
+            (
+                [(3, true), (8, true), (7, false), (11, false)],
+                [-1.0, 0.0, 0.0],
+                -ox,
+            ),
+            (
+                [(1, true), (10, true), (5, false), (9, false)],
+                [1.0, 0.0, 0.0],
+                ox + size,
+            ),
+        ];
+
+        let mut faces = Vec::new();
+        for (edges, n, d) in specs {
+            let wire = topo.add_wire(
+                Wire::new(
+                    edges
+                        .iter()
+                        .map(|&(i, fwd)| OrientedEdge::new(e[i], fwd))
+                        .collect(),
+                    true,
+                )
+                .unwrap(),
+            );
+            let surface = FaceSurface::Plane {
+                normal: brepkit_math::vec::Vec3::new(n[0], n[1], n[2]),
+                d,
+            };
+            faces.push(if reversed {
+                topo.add_face(Face::new_reversed(wire, vec![], surface))
+            } else {
+                topo.add_face(Face::new(wire, vec![], surface))
+            });
+        }
+        topo.add_shell(Shell::new(faces).unwrap())
+    }
+
+    /// A hollow cube: outer `[0,4]³` minus cavity `[1,3]³`.
+    fn hollow_cube(topo: &mut Topology) -> brepkit_topology::solid::SolidId {
+        use brepkit_topology::solid::Solid;
+
+        let outer = cube_shell(topo, 0.0, 0.0, 0.0, 4.0, false);
+        let cavity = cube_shell(topo, 1.0, 1.0, 1.0, 2.0, true);
+        topo.add_solid(Solid::new(outer, vec![cavity]))
+    }
+
+    /// E-01: a cavity shell removes volume — a hollow 4-cube with a 2-cube
+    /// void measures 64 − 8 = 56, not 64.
+    #[test]
+    fn cavity_shell_subtracts_volume() {
+        let mut topo = Topology::new();
+        let solid = hollow_cube(&mut topo);
+
+        let v = solid_volume(&topo, solid, 1e-3).unwrap();
+        assert_rel(v, 56.0, 1e-6, "hollow cube volume");
+    }
+
+    /// E-01: the cavity's walls are part of the boundary: 6·16 + 6·4 = 120.
+    #[test]
+    fn cavity_shell_adds_surface_area() {
+        let mut topo = Topology::new();
+        let solid = hollow_cube(&mut topo);
+
+        let a = solid_surface_area(&topo, solid, 1e-3).unwrap();
+        assert_rel(a, 120.0, 1e-6, "hollow cube surface area");
+    }
+
     use super::*;
 
     // For analytic primitives (box, cylinder, sphere, cone, torus) we

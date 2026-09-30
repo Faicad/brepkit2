@@ -62,9 +62,17 @@ pub fn classify_point(
     options: &ClassifyOptions,
 ) -> Result<PointClassification, CheckError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
+    // Cavity (inner) shells bound material too: a solid's voids are part of
+    // its boundary. Collecting only the outer shell makes every point in a
+    // cavity classify as Inside.
+    let mut face_set: Vec<FaceId> = Vec::new();
+    for shell_id in
+        std::iter::once(solid_data.outer_shell()).chain(solid_data.inner_shells().iter().copied())
+    {
+        face_set.extend_from_slice(topo.shell(shell_id)?.faces());
+    }
 
-    if is_on_boundary(topo, shell.faces(), point, options.tolerance)? {
+    if is_on_boundary(topo, &face_set, point, options.tolerance)? {
         return Ok(PointClassification::OnBoundary);
     }
 
@@ -92,7 +100,7 @@ pub fn classify_point(
     let mut outside_votes = 0u32;
 
     for &dir in &base_dirs {
-        let crossings = count_ray_crossings(topo, shell.faces(), point, dir)?;
+        let crossings = count_ray_crossings(topo, &face_set, point, dir)?;
         if crossings % 2 == 1 {
             inside_votes += 1;
         } else {
@@ -115,7 +123,7 @@ pub fn classify_point(
         let phi = (seed * std::f64::consts::E).fract() * std::f64::consts::PI;
         let dir = Vec3::new(phi.sin() * theta.cos(), phi.sin() * theta.sin(), phi.cos());
 
-        let crossings = count_ray_crossings(topo, shell.faces(), point, dir)?;
+        let crossings = count_ray_crossings(topo, &face_set, point, dir)?;
         if crossings % 2 == 1 {
             inside_votes += 1;
         } else {
@@ -184,17 +192,8 @@ fn is_on_boundary(
                 }
             }
         };
-        if dist < tolerance {
-            let polygon = crate::util::face_polygon(topo, fid)?;
-            if polygon.len() >= 3 {
-                let normal = boundary::polygon_normal(&polygon);
-                if crate::util::point_in_polygon_3d(&point, &polygon, &normal) {
-                    return Ok(true);
-                }
-            } else {
-                // Full-surface face (like torus with seam edges only).
-                return Ok(true);
-            }
+        if dist < tolerance && boundary::point_in_face_boundary(topo, fid, point)? {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -216,8 +215,13 @@ pub fn classify_point_winding(
     options: &ClassifyOptions,
 ) -> Result<PointClassification, CheckError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
-    if is_on_boundary(topo, shell.faces(), point, options.tolerance)? {
+    let mut face_set: Vec<FaceId> = Vec::new();
+    for shell_id in
+        std::iter::once(solid_data.outer_shell()).chain(solid_data.inner_shells().iter().copied())
+    {
+        face_set.extend_from_slice(topo.shell(shell_id)?.faces());
+    }
+    if is_on_boundary(topo, &face_set, point, options.tolerance)? {
         return Ok(PointClassification::OnBoundary);
     }
 
@@ -245,8 +249,13 @@ pub fn classify_point_robust(
     options: &ClassifyOptions,
 ) -> Result<PointClassification, CheckError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
-    if is_on_boundary(topo, shell.faces(), point, options.tolerance)? {
+    let mut face_set: Vec<FaceId> = Vec::new();
+    for shell_id in
+        std::iter::once(solid_data.outer_shell()).chain(solid_data.inner_shells().iter().copied())
+    {
+        face_set.extend_from_slice(topo.shell(shell_id)?.faces());
+    }
+    if is_on_boundary(topo, &face_set, point, options.tolerance)? {
         return Ok(PointClassification::OnBoundary);
     }
 
@@ -299,7 +308,264 @@ fn count_ray_crossings(
 mod tests {
     use super::winding;
     use super::*;
+    use brepkit_math::curves::Circle3D;
+    use brepkit_topology::edge::{Edge, EdgeCurve};
+    use brepkit_topology::face::Face;
+    use brepkit_topology::shell::Shell;
+    use brepkit_topology::solid::Solid;
     use brepkit_topology::test_utils::make_unit_cube_manifold;
+    use brepkit_topology::vertex::Vertex;
+    use brepkit_topology::wire::{OrientedEdge, Wire};
+
+    /// A planar annulus in the `z = 0` plane: square outer wire spanning
+    /// `[0,4]²`, circular hole of `hole_r` centred at `(2, 2)`.
+    fn make_annulus_face(topo: &mut Topology, hole_r: f64) -> FaceId {
+        let corners = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(4.0, 4.0, 0.0),
+            Point3::new(0.0, 4.0, 0.0),
+        ];
+        let verts: Vec<_> = corners
+            .iter()
+            .map(|&p| topo.add_vertex(Vertex::new(p, 1e-7)))
+            .collect();
+        let edges: Vec<_> = (0..4)
+            .map(|i| topo.add_edge(Edge::new(verts[i], verts[(i + 1) % 4], EdgeCurve::Line)))
+            .collect();
+        let outer = topo.add_wire(
+            Wire::new(
+                edges.iter().map(|&e| OrientedEdge::new(e, true)).collect(),
+                true,
+            )
+            .unwrap(),
+        );
+
+        let circle =
+            Circle3D::new(Point3::new(2.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 1.0), hole_r).unwrap();
+        let seam = topo.add_vertex(Vertex::new(circle.evaluate(0.0), 1e-7));
+        let circle_edge = topo.add_edge(Edge::new(seam, seam, EdgeCurve::Circle(circle)));
+        let inner =
+            topo.add_wire(Wire::new(vec![OrientedEdge::new(circle_edge, true)], true).unwrap());
+
+        topo.add_face(Face::new(
+            outer,
+            vec![inner],
+            FaceSurface::Plane {
+                normal: Vec3::new(0.0, 0.0, 1.0),
+                d: 0.0,
+            },
+        ))
+    }
+
+    /// An axis-aligned cube shell of edge length `size` at `(ox, oy, oz)`.
+    ///
+    /// `reversed` builds the shell with inward-pointing orientation — the
+    /// correct sense for a cavity (inner) shell.
+    fn make_cube_shell(
+        topo: &mut Topology,
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        size: f64,
+        reversed: bool,
+    ) -> brepkit_topology::shell::ShellId {
+        /// One cube face: its four wire edges (index, forward), plane normal
+        /// and plane offset.
+        type CubeFaceSpec = ([(usize, bool); 4], Vec3, f64);
+
+        let c =
+            |bx: f64, by: f64, bz: f64| Point3::new(ox + bx * size, oy + by * size, oz + bz * size);
+        let v: Vec<_> = [
+            c(0.0, 0.0, 0.0),
+            c(1.0, 0.0, 0.0),
+            c(1.0, 1.0, 0.0),
+            c(0.0, 1.0, 0.0),
+            c(0.0, 0.0, 1.0),
+            c(1.0, 0.0, 1.0),
+            c(1.0, 1.0, 1.0),
+            c(0.0, 1.0, 1.0),
+        ]
+        .iter()
+        .map(|&p| topo.add_vertex(Vertex::new(p, 1e-7)))
+        .collect();
+
+        // bottom ring, top ring, then the four verticals
+        let e: Vec<_> = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ]
+        .iter()
+        .map(|&(a, b)| topo.add_edge(Edge::new(v[a], v[b], EdgeCurve::Line)))
+        .collect();
+
+        // (edges as (index, forward), plane normal, plane offset d)
+        let specs: [CubeFaceSpec; 6] = [
+            (
+                [(0, false), (3, false), (2, false), (1, false)],
+                Vec3::new(0.0, 0.0, -1.0),
+                -oz,
+            ),
+            (
+                [(4, true), (5, true), (6, true), (7, true)],
+                Vec3::new(0.0, 0.0, 1.0),
+                oz + size,
+            ),
+            (
+                [(0, true), (9, true), (4, false), (8, false)],
+                Vec3::new(0.0, -1.0, 0.0),
+                -oy,
+            ),
+            (
+                [(2, true), (11, true), (6, false), (10, false)],
+                Vec3::new(0.0, 1.0, 0.0),
+                oy + size,
+            ),
+            (
+                [(3, true), (8, true), (7, false), (11, false)],
+                Vec3::new(-1.0, 0.0, 0.0),
+                -ox,
+            ),
+            (
+                [(1, true), (10, true), (5, false), (9, false)],
+                Vec3::new(1.0, 0.0, 0.0),
+                ox + size,
+            ),
+        ];
+
+        let mut faces = Vec::new();
+        for (edges, normal, d) in specs {
+            let wire = topo.add_wire(
+                Wire::new(
+                    edges
+                        .iter()
+                        .map(|&(i, fwd)| OrientedEdge::new(e[i], fwd))
+                        .collect(),
+                    true,
+                )
+                .unwrap(),
+            );
+            let surface = FaceSurface::Plane { normal, d };
+            faces.push(if reversed {
+                topo.add_face(Face::new_reversed(wire, vec![], surface))
+            } else {
+                topo.add_face(Face::new(wire, vec![], surface))
+            });
+        }
+        topo.add_shell(Shell::new(faces).unwrap())
+    }
+
+    // ── E-03: a ray landing in a face's hole is not a crossing ──────────
+
+    /// Ray straight up the hole's axis: the hit point lies inside the hole,
+    /// so the annulus does not block the ray.
+    #[test]
+    fn ray_through_face_hole_is_not_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_annulus_face(&mut topo, 1.0);
+
+        let n = boundary::count_face_ray_crossings(
+            &topo,
+            face,
+            Point3::new(2.0, 2.0, -1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        )
+        .unwrap();
+        assert_eq!(n, 0, "a hit inside the hole must not count as a crossing");
+    }
+
+    /// Control case: the same face away from the hole does block the ray.
+    #[test]
+    fn ray_through_face_material_is_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_annulus_face(&mut topo, 1.0);
+
+        let n = boundary::count_face_ray_crossings(
+            &topo,
+            face,
+            Point3::new(0.5, 0.5, -1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        )
+        .unwrap();
+        assert_eq!(
+            n, 1,
+            "a hit on the material part of the annulus counts once"
+        );
+    }
+
+    // ── E-05: cavity (inner) shells participate in classification ───────
+
+    /// A point in the cavity of a hollow cube is OUTSIDE the material.
+    ///
+    /// Outer cube `[0,4]³`, cavity cube `[1,3]³`. A ray leaving the centre
+    /// crosses the cavity wall and then the outer wall — two crossings, i.e.
+    /// outside. Counting only the outer shell yields one crossing and
+    /// mis-reports the cavity as inside.
+    #[test]
+    fn point_inside_cavity_is_outside() {
+        let mut topo = Topology::new();
+        let outer = make_cube_shell(&mut topo, 0.0, 0.0, 0.0, 4.0, false);
+        let cavity = make_cube_shell(&mut topo, 1.0, 1.0, 1.0, 2.0, true);
+        let solid = topo.add_solid(Solid::new(outer, vec![cavity]));
+
+        let result = classify_point(
+            &topo,
+            solid,
+            Point3::new(2.0, 2.0, 2.0),
+            &ClassifyOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            PointClassification::Outside,
+            "the cavity is void, not material"
+        );
+    }
+
+    /// Same cavity geometry through the winding-number classifier: a cavity
+    /// shell contributes negative winding, cancelling the outer shell's.
+    #[test]
+    fn point_inside_cavity_is_outside_winding() {
+        let mut topo = Topology::new();
+        let outer = make_cube_shell(&mut topo, 0.0, 0.0, 0.0, 4.0, false);
+        let cavity = make_cube_shell(&mut topo, 1.0, 1.0, 1.0, 2.0, true);
+        let solid = topo.add_solid(Solid::new(outer, vec![cavity]));
+
+        let w = winding::winding_number(&topo, solid, Point3::new(2.0, 2.0, 2.0)).unwrap();
+        assert!(
+            w.abs() < 0.2,
+            "winding number in a cavity must be ~0 (void), got {w}"
+        );
+    }
+
+    /// Control case: a point in the material between cavity and outer wall.
+    #[test]
+    fn point_in_shell_wall_is_inside() {
+        let mut topo = Topology::new();
+        let outer = make_cube_shell(&mut topo, 0.0, 0.0, 0.0, 4.0, false);
+        let cavity = make_cube_shell(&mut topo, 1.0, 1.0, 1.0, 2.0, true);
+        let solid = topo.add_solid(Solid::new(outer, vec![cavity]));
+
+        // (0.5, 0.5, 0.5) sits in the 1-unit-thick wall.
+        let result = classify_point(
+            &topo,
+            solid,
+            Point3::new(0.5, 0.5, 0.5),
+            &ClassifyOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(result, PointClassification::Inside);
+    }
 
     #[test]
     fn point_inside_box() {

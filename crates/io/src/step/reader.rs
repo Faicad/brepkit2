@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use brepkit_math::curves::Ellipse3D;
 use brepkit_math::vec::{Point3, Vec3};
 use brepkit_topology::Topology;
 use brepkit_topology::edge::{Edge, EdgeCurve};
@@ -318,11 +319,7 @@ impl<'a> StepBuilder<'a> {
             }
             _ if entity_type.is_empty() || attrs.contains("B_SPLINE_SURFACE_WITH_KNOTS") => {
                 let is_rational = attrs.contains("RATIONAL");
-                let bspline_attrs = find_composite_bspline_attrs(&attrs, "B_SPLINE_SURFACE")
-                    .ok_or_else(|| IoError::UnsupportedEntity {
-                        entity: format!("composite surface #{surface_ref}"),
-                    })?;
-                self.build_bspline_surface(surface_ref, bspline_attrs, is_rational)
+                self.build_bspline_surface(surface_ref, &attrs, is_rational)
             }
             _ => Err(IoError::UnsupportedEntity {
                 entity: entity_type,
@@ -427,22 +424,21 @@ impl<'a> StepBuilder<'a> {
                         reason: format!("ELLIPSE #{curve_ref} needs semi_major and semi_minor"),
                     });
                 }
-                let (center, normal, _u_axis) = self.build_axis2_placement(axis_ref)?;
-                let ellipse =
-                    brepkit_math::curves::Ellipse3D::new(center, normal, floats[0], floats[1])
-                        .map_err(|e| IoError::ParseError {
-                            reason: format!("ELLIPSE #{curve_ref}: {e}"),
-                        })?;
+                // The placement's reference direction (its x axis) IS the
+                // major axis: constructing the ellipse from `normal` alone
+                // pins the major axis to an arbitrary perpendicular and
+                // rotates every imported ellipse.
+                let (center, normal, u_axis) = self.build_axis2_placement(axis_ref)?;
+                let ellipse = Ellipse3D::new_with_ref(center, normal, floats[0], floats[1], u_axis)
+                    .map_err(|e| IoError::ParseError {
+                        reason: format!("ELLIPSE #{curve_ref}: {e}"),
+                    })?;
                 Ok(EdgeCurve::Ellipse(ellipse))
             }
             "B_SPLINE_CURVE_WITH_KNOTS" => self.build_bspline_curve(curve_ref, &attrs, false),
             _ if entity_type.is_empty() || attrs.contains("B_SPLINE_CURVE_WITH_KNOTS") => {
                 let is_rational = attrs.contains("RATIONAL");
-                let bspline_attrs = find_composite_bspline_attrs(&attrs, "B_SPLINE_CURVE")
-                    .ok_or_else(|| IoError::UnsupportedEntity {
-                        entity: format!("composite curve #{curve_ref}"),
-                    })?;
-                self.build_bspline_curve(curve_ref, bspline_attrs, is_rational)
+                self.build_bspline_curve(curve_ref, &attrs, is_rational)
             }
             _ => Err(IoError::UnsupportedEntity {
                 entity: format!("{entity_type} (curve #{curve_ref})"),
@@ -459,9 +455,10 @@ impl<'a> StepBuilder<'a> {
         attrs: &str,
         is_rational: bool,
     ) -> Result<EdgeCurve, IoError> {
-        let parsed = parse_bspline_curve_attrs(attrs).ok_or_else(|| IoError::ParseError {
-            reason: format!("B_SPLINE_CURVE #{curve_ref} could not parse attributes"),
-        })?;
+        let parsed = parse_bspline_curve_attrs(bspline_geom_attrs(attrs, "B_SPLINE_CURVE"))
+            .ok_or_else(|| IoError::ParseError {
+                reason: format!("B_SPLINE_CURVE #{curve_ref} could not parse attributes"),
+            })?;
         let (degree, cp_refs, mults, knot_vals) = parsed;
 
         let mut control_points = Vec::with_capacity(cp_refs.len());
@@ -471,7 +468,9 @@ impl<'a> StepBuilder<'a> {
 
         let knots = expand_knots(&mults, &knot_vals);
 
-        // Extract weights from RATIONAL_B_SPLINE section if present.
+        // Weights live in the entity's `RATIONAL_B_SPLINE_*` partial, which
+        // sits *before* the knot-bearing partial — so they have to be read
+        // from the whole attribute string, not from the geometry substring.
         let weights = if is_rational {
             extract_rational_weights(attrs, control_points.len())
         } else {
@@ -492,9 +491,10 @@ impl<'a> StepBuilder<'a> {
         attrs: &str,
         is_rational: bool,
     ) -> Result<FaceSurface, IoError> {
-        let parsed = parse_bspline_surface_attrs(attrs).ok_or_else(|| IoError::ParseError {
-            reason: format!("B_SPLINE_SURFACE #{surface_ref} could not parse attributes"),
-        })?;
+        let parsed = parse_bspline_surface_attrs(bspline_geom_attrs(attrs, "B_SPLINE_SURFACE"))
+            .ok_or_else(|| IoError::ParseError {
+                reason: format!("B_SPLINE_SURFACE #{surface_ref} could not parse attributes"),
+            })?;
         let (degree_u, degree_v, cp_grid_refs, u_mults, v_mults, u_knots, v_knots) = parsed;
 
         let mut cp_grid: Vec<Vec<Point3>> = Vec::new();
@@ -666,22 +666,36 @@ fn parse_floats(attrs: &str) -> Vec<f64> {
     result
 }
 
+/// The attribute substring carrying a B-spline's knots and control points.
+///
+/// Inside a complex instance (`RATIONAL_B_SPLINE_CURVE(…) B_SPLINE_CURVE_WITH_KNOTS(…)`)
+/// this is the part after the knot-bearing partial; for a plain
+/// `B_SPLINE_*_WITH_KNOTS` entity the whole attribute string is already that
+/// list, so it is returned unchanged.
+fn bspline_geom_attrs<'a>(attrs: &'a str, base_name: &str) -> &'a str {
+    find_composite_bspline_attrs(attrs, base_name).unwrap_or(attrs)
+}
+
 /// Find the B-spline attribute substring within a composite STEP entity.
 ///
 /// Searches for `"{base_name}_WITH_KNOTS"` first, then falls back to `base_name`.
 /// Returns the portion of `attrs` after the matched marker.
 fn find_composite_bspline_attrs<'a>(attrs: &'a str, base_name: &str) -> Option<&'a str> {
     let with_knots = format!("{base_name}_WITH_KNOTS");
-    if let Some(pos) = attrs.find(&with_knots) {
-        return Some(&attrs[pos + with_knots.len()..]);
-    }
-    // Anchor on base_name followed by '(' to avoid matching inside
-    // "RATIONAL_B_SPLINE_CURVE" when searching for "B_SPLINE_CURVE".
-    let anchored = format!("{base_name}(");
-    if let Some(pos) = attrs.find(&anchored) {
-        return Some(&attrs[pos + base_name.len()..]);
-    }
-    None
+    let after = if let Some(pos) = attrs.find(&with_knots) {
+        &attrs[pos + with_knots.len()..]
+    } else {
+        // Anchor on base_name followed by '(' to avoid matching inside
+        // "RATIONAL_B_SPLINE_CURVE" when searching for "B_SPLINE_CURVE".
+        let anchored = format!("{base_name}(");
+        let pos = attrs.find(&anchored)?;
+        &attrs[pos + base_name.len()..]
+    };
+    // A complex instance writes each partial entity as `NAME(attrs)`. The
+    // attribute parsers below expect the bare list, without that opening
+    // paren — leaving it in makes every group look nested one level deep.
+    let trimmed = after.trim_start();
+    Some(trimmed.strip_prefix('(').unwrap_or(trimmed))
 }
 
 /// Parse integers from a parenthesized list like `(4, 4)`.

@@ -17,7 +17,7 @@ use brepkit_topology::face::{FaceId, FaceSurface};
 
 use crate::CheckError;
 use crate::classify::ray_surface;
-use crate::util::{face_polygon, point_in_polygon_3d};
+use crate::util::{face_boundary_loops, point_in_polygon_3d};
 
 /// Minimum positive ray parameter to count as a forward hit.
 const RAY_T_MIN: f64 = 1e-12;
@@ -27,6 +27,70 @@ const HALF_SPACE_EPS: f64 = 1e-10;
 
 /// Threshold for coincident vertex detection (squared distance).
 const COINCIDENT_SQ: f64 = 1e-12;
+
+/// Whether a 3D hit point lies on the trimmed face.
+///
+/// `loops` is `[outer, hole…]` as returned by
+/// [`face_boundary_loops`](crate::util::face_boundary_loops): the point must
+/// lie inside the outer loop and outside every hole loop.
+fn hit_in_boundary_3d(hit: &Point3, loops: &[Vec<Point3>], normal: &Vec3) -> bool {
+    match loops.split_first() {
+        Some((outer, holes)) => {
+            point_in_polygon_3d(hit, outer, normal)
+                && !holes
+                    .iter()
+                    .any(|h| h.len() >= 3 && point_in_polygon_3d(hit, h, normal))
+        }
+        None => false,
+    }
+}
+
+/// Whether a (u,v) hit lies on the trimmed face, in UV space.
+///
+/// Mirrors [`hit_in_boundary_3d`]: inside the outer loop, outside every hole.
+fn hit_in_boundary_uv(
+    hit_u: f64,
+    hit_v: f64,
+    uv_loops: &[Vec<(f64, f64)>],
+    v_periodic: bool,
+) -> bool {
+    match uv_loops.split_first() {
+        Some((outer, holes)) => {
+            point_in_uv_boundary(hit_u, hit_v, outer, v_periodic)
+                && !holes
+                    .iter()
+                    .any(|h| h.len() >= 3 && point_in_uv_boundary(hit_u, hit_v, h, v_periodic))
+        }
+        None => false,
+    }
+}
+
+/// Whether a point lies on a face's trimmed area: inside the outer loop and
+/// outside every hole loop.
+///
+/// A degenerate (full-surface) boundary — fewer than three distinct vertices
+/// — carries no trimming information, so every point counts as on the face.
+///
+/// # Errors
+///
+/// Returns an error if topology lookups fail.
+pub fn point_in_face_boundary(
+    topo: &Topology,
+    face_id: FaceId,
+    point: Point3,
+) -> Result<bool, CheckError> {
+    let loops = face_boundary_loops(topo, face_id)?;
+    let Some(outer) = loops.first() else {
+        return Ok(false);
+    };
+    if outer.len() < 3 {
+        return Ok(true);
+    }
+    let normal = polygon_normal(outer);
+    let face = topo.face(face_id)?;
+    let normal = if face.is_reversed() { -normal } else { normal };
+    Ok(hit_in_boundary_3d(&point, &loops, &normal))
+}
 
 /// Unwrap a step in a periodic (angular) coordinate so the difference
 /// lies in `[-PI, PI)`.
@@ -146,22 +210,27 @@ where
         return Ok(0);
     }
 
-    let verts = face_polygon(topo, face_id)?;
+    let loops = face_boundary_loops(topo, face_id)?;
 
     // Detect degenerate boundary: a "full-surface" face whose wire has fewer
     // than 3 distinct vertices. Every positive-t root is a crossing.
-    let is_full_surface = verts.len() < 3 || {
-        let ref_pt = verts[0];
-        verts
-            .iter()
-            .all(|v| (*v - ref_pt).length_squared() < COINCIDENT_SQ)
-    };
+    let is_full_surface = loops.first().is_none_or(|outer| {
+        outer.len() < 3 || {
+            let ref_pt = outer[0];
+            outer
+                .iter()
+                .all(|v| (*v - ref_pt).length_squared() < COINCIDENT_SQ)
+        }
+    });
     if is_full_surface {
         #[allow(clippy::cast_possible_truncation)]
         return Ok(roots.iter().filter(|&&t| t > RAY_T_MIN).count() as u32);
     }
 
-    let uv_boundary = build_uv_boundary(&verts, &project, v_periodic);
+    let uv_loops: Vec<Vec<(f64, f64)>> = loops
+        .iter()
+        .map(|l| build_uv_boundary(l, &project, v_periodic))
+        .collect();
 
     let mut crossings = 0u32;
     for &t in roots {
@@ -171,7 +240,7 @@ where
         let hit = origin + direction * t;
         let (hit_u, hit_v) = project(hit);
 
-        if point_in_uv_boundary(hit_u, hit_v, &uv_boundary, v_periodic) {
+        if hit_in_boundary_uv(hit_u, hit_v, &uv_loops, v_periodic) {
             crossings += 1;
         }
     }
@@ -201,17 +270,17 @@ fn count_3d_polygon_crossings(
         return Ok(0);
     }
 
-    let verts = face_polygon(topo, face_id)?;
-    if verts.len() < 3 {
+    let loops = face_boundary_loops(topo, face_id)?;
+    if loops.first().is_none_or(|outer| outer.len() < 3) {
         return Ok(0);
     }
-    let mut normal = polygon_normal(&verts);
+    let mut normal = polygon_normal(&loops[0]);
     // If the face is reversed, the surface normal is flipped.
     let face = topo.face(face_id)?;
     if face.is_reversed() {
         normal = -normal;
     }
-    let ref_pt = verts[0];
+    let ref_pt = loops[0][0];
 
     let mut crossings = 0u32;
     for &t in roots {
@@ -226,7 +295,7 @@ fn count_3d_polygon_crossings(
             continue;
         }
 
-        if point_in_polygon_3d(&hit, &verts, &normal) {
+        if hit_in_boundary_3d(&hit, &loops, &normal) {
             crossings += 1;
         }
     }
@@ -323,12 +392,12 @@ fn ray_plane_crossings(
     };
 
     let hit = origin + direction * t;
-    let verts = face_polygon(topo, face_id)?;
-    if verts.len() < 3 {
+    let loops = face_boundary_loops(topo, face_id)?;
+    if loops.first().is_none_or(|outer| outer.len() < 3) {
         return Ok(0);
     }
 
-    if point_in_polygon_3d(&hit, &verts, &normal) {
+    if hit_in_boundary_3d(&hit, &loops, &normal) {
         Ok(1)
     } else {
         Ok(0)
@@ -348,19 +417,22 @@ fn ray_crossings_nurbs(
         return Ok(0);
     }
 
-    let verts = face_polygon(topo, face_id)?;
-    if verts.len() < 3 {
+    let loops = face_boundary_loops(topo, face_id)?;
+    if loops.first().is_none_or(|outer| outer.len() < 3) {
         // Full-surface face — every forward hit is a crossing.
         #[allow(clippy::cast_possible_truncation)]
         return Ok(hits.len() as u32);
     }
 
     let project = |p: Point3| -> (f64, f64) { surface.project_point(p) };
-    let uv_boundary = build_uv_boundary(&verts, &project, false);
+    let uv_loops: Vec<Vec<(f64, f64)>> = loops
+        .iter()
+        .map(|l| build_uv_boundary(l, &project, false))
+        .collect();
 
     let mut crossings = 0u32;
     for (_, hit_u, hit_v) in &hits {
-        if point_in_uv_boundary(*hit_u, *hit_v, &uv_boundary, false) {
+        if hit_in_boundary_uv(*hit_u, *hit_v, &uv_loops, false) {
             crossings += 1;
         }
     }
