@@ -51,7 +51,9 @@ fn assert_golden(name: &str, actual: &str) {
 }
 
 fn round6(v: f64) -> f64 {
-    (v * 1_000_000.0).round() / 1_000_000.0
+    // Normalize -0.0 to 0.0 so the sign doesn't depend on platform FP order.
+    let r = (v * 1_000_000.0).round() / 1_000_000.0;
+    if r == 0.0 { 0.0 } else { r }
 }
 
 // ── Measurement snapshot ────────────────────────────────────────────
