@@ -11,7 +11,7 @@ Deep detail for the layer-boundaries skill. All paths and symbols verified again
 
 ### Delegate methods (where NOT to fan out)
 
-The delegates are inherent methods on the enums, in the same files as the enum definitions. CLAUDE.md's pointer to `math/src/traits.rs` for these delegates is stale: that file holds the `ParametricCurve`/`ParametricSurface` traits and their impls for concrete geometry types, and never mentions `EdgeCurve` or `FaceSurface`.
+The delegates are inherent methods on the enums, in the same files as the enum definitions. AGENTS.md's pointer to `math/src/traits.rs` for these delegates is stale: that file holds the `ParametricCurve`/`ParametricSurface` traits and their impls for concrete geometry types, and never mentions `EdgeCurve` or `FaceSurface`.
 
 - `EdgeCurve` delegates (`crates/topology/src/edge.rs`): `evaluate_with_endpoints`, `tangent_with_endpoints`, `domain_with_endpoints`, `type_tag`. Locate: `rg -n 'fn evaluate_with_endpoints' crates/topology/src/edge.rs`.
 - `FaceSurface` delegates (`crates/topology/src/face.rs`): `evaluate`, `normal`, `project_point`, `estimate_radius`, `type_tag`, `is_planar`, `is_analytic`, `as_analytic`. Locate: `rg -n 'fn as_analytic' crates/topology/src/face.rs`.
@@ -62,14 +62,14 @@ Every call site that goes through a delegate is done once the delegate impl has 
   - Pass: `Checking crate boundary rules...` then `✅ All crate boundaries valid.`, exit 0.
   - Fail: one `VIOLATION: crates/<crate> depends on <dep> (not allowed)` per offense, then `❌ Boundary check failed.`, exit 1.
   - `SKIP: crates/<name>/Cargo.toml not found` means a crate was renamed or removed; update the script's `check_deps` calls.
-- Allowlist vs CLAUDE.md table: the script permits `brepkit-geometry` for `algo` and `blend`, and a direct `brepkit-blend` dep for `wasm` (the table allows blend only transitively, via operations; wasm's other deps, including offset and sketch, are allowed by both). None of the extra allowances are used in the actual Cargo.tomls today. If you find yourself needing one, it passes CI, but confirm the layering intent in review first; the CLAUDE.md table is the source of truth for intent.
+- Allowlist vs AGENTS.md table: the script permits `brepkit-geometry` for `algo` and `blend`, and a direct `brepkit-blend` dep for `wasm` (the table allows blend only transitively, via operations; wasm's other deps, including offset and sketch, are allowed by both). None of the extra allowances are used in the actual Cargo.tomls today. If you find yourself needing one, it passes CI, but confirm the layering intent in review first; the AGENTS.md table is the source of truth for intent.
 - Enforcement points: CI job `boundaries` in `.github/workflows/ci.yml`, gated into `ci-pass`. The `.husky/pre-push` hook runs nothing (it delegates to CI), and `.husky/pre-commit` runs fmt + clippy + taplo + machete only. So a boundary violation surfaces at PR time unless you run the script yourself.
 
 ## Symptom-to-cause: boundary and cycle failures
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `error[E0432]: unresolved import brepkit_x` in crate Y | Missing Cargo dep, possibly because the layer forbids it | Check the CLAUDE.md table. If forbidden: move the code down or restructure. If allowed: add the dep and re-run the script |
+| `error[E0432]: unresolved import brepkit_x` in crate Y | Missing Cargo dep, possibly because the layer forbids it | Check the AGENTS.md table. If forbidden: move the code down or restructure. If allowed: add the dep and re-run the script |
 | Script prints VIOLATION for a dep you believe is fine | The dep string appears in `[dependencies]` (even transitively via a table entry you edited) | Read the crate's Cargo.toml `[dependencies]` block; the script only sees that section |
 | `expected struct brepkit_topology::Topology, found struct brepkit_topology::Topology` | Two feature-resolved builds of topology, usually from an upward dev-dep on topology | Remove the offending dev-dep; move the helper into `topology/src/test_utils.rs` behind `test-utils` |
 | A crate compiles locally but the `boundaries` CI job fails | You added the dep but never ran the script | `./scripts/check-boundaries.sh` locally, fix, push |

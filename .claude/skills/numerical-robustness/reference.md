@@ -18,7 +18,7 @@ Companion catalog to SKILL.md. All paths and symbols verified against the curren
 | `parametric(deriv_mag)` | `linear / deriv_mag`, clamped to `[1e-15, 0.1]` | converting linear tolerance into a curve/surface parameter tolerance |
 | `linear_sq()` | squared linear | distance-squared comparisons without sqrt |
 
-Rule (also in CLAUDE.md, Key Patterns): never compare floats with `==`.
+Rule (also in AGENTS.md, Key Patterns): never compare floats with `==`.
 
 Pitfall: `approx_eq` on parameter values silently loosens the comparison when the parameter is large (relative term dominates). Use `approx_eq_abs` for parameters, or `parametric()` when the parameter tolerance should track a derivative magnitude.
 

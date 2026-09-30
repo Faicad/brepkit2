@@ -16,7 +16,7 @@ a file. The reader must be trustworthy first.
   cylinders/planes.
 - Proving a written file re-reads with its geometry intact (writer conformance).
 - Capturing a fixture from a real file and confirming it is faithful (analytic, not lossy).
-- Adding or extending a format (deltas over CLAUDE.md Recipe 2 are here).
+- Adding or extending a format (deltas over AGENTS.md Recipe 2 are here).
 
 ## Format matrix
 
@@ -143,7 +143,7 @@ Sanity-check output two ways: (a) re-read it and run the type + volume asserts a
 (pattern `step_output_has_valid_syntax` checks the `ISO-10303-21;` / `HEADER;` / `DATA;` /
 `END-ISO-10303-21;` envelope); (b) open it in an external STEP viewer.
 
-## Adding a format: deltas over CLAUDE.md Recipe 2
+## Adding a format: deltas over AGENTS.md Recipe 2
 
 Recipe 2 covers the module scaffold, `lib.rs` `pub mod`, and signatures. It omits or gets
 wrong:

@@ -21,7 +21,7 @@ Out of scope (excluded in `scripts/translation-pairing.manifest.json`):
 - `docs/plans/` — design documents, single-language
 - `docs/analysis/` — technical analysis, single-language
 - `book/src/` — mdBook guide, English only
-- `CLAUDE.md`, `AGENTS.md`, `docs/AGENTS.md`, `.agents/notes/AGENTS.md` — instruction files, English only
+- `AGENTS.md`, `docs/AGENTS.md`, `.agents/notes/AGENTS.md` — instruction files, English only
 - `docs/i18n/terminology.md`, `docs/i18n/style-samples.md`, `docs/i18n/translation-prompt.md` — bilingual by construction or machine-consumed
 
 ## Consistency record

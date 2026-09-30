@@ -21,7 +21,7 @@ Never `wasm-pack build --target web` for node consumption: the web target's init
 
 ## Procedure: add a binding
 
-CLAUDE.md Recipe 4 covers the skeleton (js_name, `validate_positive`/`validate_finite`, `?` via the blanket `From<E> for JsError`). What it omits or gets stale:
+AGENTS.md Recipe 4 covers the skeleton (js_name, `validate_positive`/`validate_finite`, `?` via the blanket `From<E> for JsError`). What it omits or gets stale:
 
 1. Pick or create `crates/wasm/src/bindings/<domain>.rs`. Do not add bindings to `kernel.rs` (it holds the struct, constructor, and private helpers only, despite Recipe 1's stale wording).
 2. Reads go through `self.topo` / `self.topo()`; writes MUST go through `self.topo_mut()` (it is `Rc::make_mut` copy-on-write shared with checkpoints; rg: `fn topo_mut` in `kernel.rs`).
@@ -61,7 +61,7 @@ Cheap path first: brepjs already aliases `'brepkit-wasm'` in `~/Git/brepjs/vites
 - Do not conclude "re-entrancy bug" from the "recursive use of an object" error; look for an earlier panic first.
 - Do not trust that a JS consumer picked up your local build; verify (md5 the `.wasm`, or probe a binding that only exists in the new build).
 - Do not add timing code with bare `std::time::Instant` anywhere reachable from `brepkit-wasm`.
-- Do not follow CLAUDE.md Recipe 4's "add a `batch_*` companion fn" literally; add a `dispatch_op` match arm.
+- Do not follow AGENTS.md Recipe 4's "add a `batch_*` companion fn" literally; add a `dispatch_op` match arm.
 - Do not reach for the `#[wasm_binding]` macro; it is unwired.
 
 ## Binary size

@@ -7,13 +7,13 @@ description: Use when adding a new modeling operation to crates/operations (a ne
 
 ## When to use
 
-You are creating or substantially extending an operation in `crates/operations/src/` (extrude/revolve/sweep class, a measure, a transform, a new primitive). CLAUDE.md Recipe 3 gives the file scaffolding. This skill adds what Recipe 3 omits: the verification bar, where tests go, and the correctness traps that produce compiles-but-wrong geometry.
+You are creating or substantially extending an operation in `crates/operations/src/` (extrude/revolve/sweep class, a measure, a transform, a new primitive). AGENTS.md Recipe 3 gives the file scaffolding. This skill adds what Recipe 3 omits: the verification bar, where tests go, and the correctness traps that produce compiles-but-wrong geometry.
 
 ## Quick reference
 
 | Step | Command / API | Expect |
 |------|---------------|--------|
-| Scaffold | CLAUDE.md Recipe 3 | file, fn, `lib.rs` module, wasm binding, batch dispatch |
+| Scaffold | AGENTS.md Recipe 3 | file, fn, `lib.rs` module, wasm binding, batch dispatch |
 | Measure | `crate::measure::solid_volume(&topo, solid, 0.001)` | relative error < 1% vs closed form |
 | Validate | `crate::validate::validate_solid(&topo, solid)` | `report.is_valid()` true |
 | Watertight | `tessellate_solid_with_tolerance` + `tessellate::is_watertight` | 0 boundary + 0 non-manifold edges (index-based); also re-check with the positional-weld helper from `tessellate_watertight.rs` |
@@ -22,18 +22,18 @@ You are creating or substantially extending an operation in `crates/operations/s
 
 ## Procedure
 
-1. **Scaffold per CLAUDE.md Recipe 3.** Signature `pub fn op_name(topo: &mut Topology, ...) -> Result<SolidId, OperationsError>`.
-2. **Walk faces correctly.** Any solid-scoped loop over faces must use `brepkit_topology::explorer::solid_faces` (there is also `solid_edges`). See CLAUDE.md "Walking faces in a solid" for the exception rule for per-shell operations. Iterating only `outer_shell()` compiles, passes on simple boxes, and silently skips cavity faces on hollow solids.
-3. **Respect the borrow pattern and error rules.** Snapshot-then-allocate and closure return type annotations: see CLAUDE.md Common Pitfalls. The workspace denies `unwrap_used`, `panic`, and `unsafe_code` in production code; test modules opt out with `#![allow(clippy::unwrap_used, clippy::expect_used)]`.
+1. **Scaffold per AGENTS.md Recipe 3.** Signature `pub fn op_name(topo: &mut Topology, ...) -> Result<SolidId, OperationsError>`.
+2. **Walk faces correctly.** Any solid-scoped loop over faces must use `brepkit_topology::explorer::solid_faces` (there is also `solid_edges`). See AGENTS.md "Walking faces in a solid" for the exception rule for per-shell operations. Iterating only `outer_shell()` compiles, passes on simple boxes, and silently skips cavity faces on hollow solids.
+3. **Respect the borrow pattern and error rules.** Snapshot-then-allocate and closure return type annotations: see AGENTS.md Common Pitfalls. The workspace denies `unwrap_used`, `panic`, and `unsafe_code` in production code; test modules opt out with `#![allow(clippy::unwrap_used, clippy::expect_used)]`.
 4. **If your op copies edges that may carry periodic curves** (`EdgeCurve::Circle` or `Ellipse`), read reference.md "Periodic edge copies" before writing the copy loop. Getting this wrong recovers the complementary arc (minor instead of major) and only reversed edges expose it.
 5. **Write tests** (placement below). Every geometry-producing op needs at least: a volume-vs-closed-form test, a `validate_solid` test, and a watertight-tessellation test.
 6. **Run the verification bar** (reference.md "Verification bar" has the exact APIs and checkpoint expectations). If the op touches analytic geometry, run the approx census; a fallback probe firing for your op means you degraded analytic surfaces to NURBS or mesh, see the analytic-preservation skill.
-7. **Expose to wasm** per CLAUDE.md Recipe 4; details in the wasm-bindings skill (binding module choice, `batch_*` companion, contract tests via `execute_batch()`).
+7. **Expose to wasm** per AGENTS.md Recipe 4; details in the wasm-bindings skill (binding module choice, `batch_*` companion, contract tests via `execute_batch()`).
 8. **Run the gate commands** from the quick reference before pushing.
 
 ## Where tests go
 
-CLAUDE.md's Testing section reads as if golden and integration tests live at the repo root. They do not; the root dirs hold data and docs only.
+AGENTS.md's Testing section reads as if golden and integration tests live at the repo root. They do not; the root dirs hold data and docs only.
 
 | Kind | Location | Pattern |
 |------|----------|---------|

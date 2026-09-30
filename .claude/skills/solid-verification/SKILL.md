@@ -54,7 +54,7 @@ Details and the full path list: [reference.md](reference.md), section "Volume pa
 
 ## Verification bar for shipping a geometry change
 
-1. Suite green: `cargo test --workspace`, `cargo clippy --all-targets -- -D warnings`, `./scripts/check-boundaries.sh` (see CLAUDE.md, Commands).
+1. Suite green: `cargo test --workspace`, `cargo clippy --all-targets -- -D warnings`, `./scripts/check-boundaries.sh` (see AGENTS.md, Commands).
 2. Census unchanged or improved: `cargo run --release --example approx_census -p brepkit-operations`. No new approximation probes fire; face counts stay analytic-sized. Re-run this after every boolean-engine change; prior results go stale.
 3. Watertight both ways: B-Rep free edges 0 and non-manifold 0; mesh boundary edges 0.
 4. Ray-cast spot checks with `brepkit_check::classify::classify_point` at points that encode the intent of the change.
@@ -69,7 +69,7 @@ Details and the full path list: [reference.md](reference.md), section "Volume pa
 - "Triangle count looks normal, so no mesh fallback." Triangle count masks the fallback. Only the face census tells.
 - "V-E+F != 2, so the solid is broken." Not if it has a through-hole or inner loops; use the operations-crate Euler check.
 - "Two volumes at 0.1 and 0.01 deflection agree, so it converged." Both were likely clamped to the same effective deflection. Use requests finer than `bbox_diag * 5e-5`.
-- "I walked `outer_shell()` and saw all the faces." Hollow solids have inner shells; use `explorer::solid_faces` (see CLAUDE.md, Walking faces in a solid).
+- "I walked `outer_shell()` and saw all the faces." Hollow solids have inner shells; use `explorer::solid_faces` (see AGENTS.md, Walking faces in a solid).
 
 ## Related skills
 

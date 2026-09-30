@@ -55,5 +55,5 @@ esac
 if [ -n "$VIOLATIONS" ]; then
   echo "⚠️  LAYER BOUNDARY VIOLATION in ${CRATE} crate:"
   printf "%b" "$VIOLATIONS"
-  echo "See CLAUDE.md 'Layer dependency rules' for allowed imports."
+  echo "See AGENTS.md 'Layer dependency rules' for allowed imports."
 fi

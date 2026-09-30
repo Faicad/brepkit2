@@ -93,7 +93,7 @@ Missing file panics with "Run with UPDATE_GOLDEN=1 to create it." New golden fil
 - Do not conclude a boolean fix works because volume looks right. Tessellation-based volume can read high and mask failures. Use `classify_point` probes and edge-use counts.
 - Do not conclude a result is analytic because it is valid and manifold. Face count is the reliable tell: analytic results have a handful of faces, mesh fallback has hundreds to thousands of all-planar facets.
 - Do not delete or skip an `#[ignore]` test because it fails when run with `--ignored`. It is supposed to fail, that is its job.
-- Do not call wasm binding methods directly in tests. `JsError` cannot be constructed on non-wasm targets; go through `execute_batch` (see CLAUDE.md, Recipe 4).
+- Do not call wasm binding methods directly in tests. `JsError` cannot be constructed on non-wasm targets; go through `execute_batch` (see AGENTS.md, Recipe 4).
 - Do not hand-edit `.proptest-regressions` files. proptest writes failing seeds there automatically; commit them, they are regression tests.
 - Do not leave a half-verified fix in the tree "for the next session". Revert and write the ready-repro instead.
 - Do not skip git hooks to get a red tree pushed. Pre-commit and pre-push gates are the contract.

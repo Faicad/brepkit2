@@ -68,7 +68,7 @@ File: `crates/math/src/analytic_intersection.rs`. Inventory
    single digits, not hundreds.
 
 Note: `crates/math/src/analytic_intersection.rs` is one of the ripple sites when
-adding a `FaceSurface` variant (see CLAUDE.md, Ripple-Effect Checklists).
+adding a `FaceSurface` variant (see AGENTS.md, Ripple-Effect Checklists).
 
 ## 3. Doctrine items with code evidence
 

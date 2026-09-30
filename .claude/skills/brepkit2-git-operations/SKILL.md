@@ -13,7 +13,7 @@
 
 **未跑测试时不准主动 commit。** 提交代码前必须跑测试，或者用户明确说"commit"、"提交"或类似指令后才能 `git commit`。
 
-**不准单独提交文档。** 文档（CLAUDE.md / docs/ / book/ / README 等）必须与它所描述 / 对应的代码改动放在同一次 commit 里，不要在没有相关代码改动时单独 `git commit` 文档。文档改动应随其实现一起入库。
+**不准单独提交文档。** 文档（AGENTS.md / docs/ / book/ / README 等）必须与它所描述 / 对应的代码改动放在同一次 commit 里，不要在没有相关代码改动时单独 `git commit` 文档。文档改动应随其实现一起入库。
 
 **Commit message 不带任何 Co-Authored-By 尾部信息。** Conventional commits（英文），由 commitlint 强制。
 

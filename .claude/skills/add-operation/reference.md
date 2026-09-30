@@ -118,7 +118,7 @@ All primitives in `crates/operations/src/primitives.rs` place their base at z = 
 `OperationsError` has multiple `#[error(transparent)] #[from]` variants (topology, math, and others). Two consequences:
 
 - `?` works directly on lower-layer results; do not hand-wrap.
-- Closures that return a `Result` need an explicit annotation, `|x| -> Result<_, OperationsError> { ... }`, because inference cannot pick among the `From` impls (CLAUDE.md Common Pitfalls has the snippet).
+- Closures that return a `Result` need an explicit annotation, `|x| -> Result<_, OperationsError> { ... }`, because inference cannot pick among the `From` impls (AGENTS.md Common Pitfalls has the snippet).
 
 ## Symptom-to-cause table
 
@@ -131,5 +131,5 @@ All primitives in `crates/operations/src/primitives.rs` place their base at z = 
 | Watertight by `is_watertight` but a slicer sees holes | Index-shared but positionally split vertices, or the reverse | Positional-weld check from `tessellate_watertight.rs` |
 | Census shows a fallback for an op that should be analytic | Surface type degraded during the op | analytic-preservation skill |
 | Cone face normal or point evaluation off by a complement | half_angle treated as angle from axis | "Cone conventions" above |
-| Borrow-checker fight when copying entities | Reading and allocating in one expression | Snapshot-then-allocate, CLAUDE.md Common Pitfalls |
+| Borrow-checker fight when copying entities | Reading and allocating in one expression | Snapshot-then-allocate, AGENTS.md Common Pitfalls |
 | Volume off by a translation-dependent amount | Assumed centered primitive | Base is at z = 0 |

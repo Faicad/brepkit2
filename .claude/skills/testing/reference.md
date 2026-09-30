@@ -52,7 +52,7 @@ All in `crates/operations/benches/`: `cad_operations.rs`, `boolean_perf.rs`, `bo
 cargo bench -p brepkit-operations --bench boolean_perf
 ```
 
-For profiling a bench, see CLAUDE.md, Profiling, and the profiling skill. For cross-kernel comparison against the reference kernel, use the brepjs harness (see the parity-benchmarking skill).
+For profiling a bench, see AGENTS.md, Profiling, and the profiling skill. For cross-kernel comparison against the reference kernel, use the brepjs harness (see the parity-benchmarking skill).
 
 ### 1f. WASM contract tests via `execute_batch`
 
@@ -68,7 +68,7 @@ let result = k.execute_batch(
 
 then parse the JSON with the file's local helpers (`parse_batch`, `assert_ok`, `assert_no_crash`, `ok_f64`, `ok_bbox`). `execute_batch` is defined in `crates/wasm/src/bindings/batch.rs`.
 
-Why this shape: `JsError` cannot be constructed on non-wasm targets, so binding methods cannot be called directly in native tests. `execute_batch` takes and returns strings, so `cargo test -p brepkit-wasm` runs these on the host. See CLAUDE.md, Recipe 4.
+Why this shape: `JsError` cannot be constructed on non-wasm targets, so binding methods cannot be called directly in native tests. `execute_batch` takes and returns strings, so `cargo test -p brepkit-wasm` runs these on the host. See AGENTS.md, Recipe 4.
 
 Handle gotcha, documented in the file header: solid handles in a batch are arena indices, not batch result indices. The header lists which ops create new solids (`makeBox`, `fuse`, `cut`, `extrude`, ...) versus which return the same handle or a float (`transform`, `volume`, `boundingBox`, ...). Count created solids to compute the handle for a later op.
 

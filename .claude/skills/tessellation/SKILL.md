@@ -86,5 +86,5 @@ CPU tessellation is not the only consumer of surface parameters. `crates/render/
 - Do NOT widen a structured mesher's acceptance heuristically. If the shape check is not exact, return `Ok(false)` and let the chain fall through; a wrong structured mesh is worse than a snap-path crack.
 - Do NOT fix winding per-triangle. Orient the run.
 - Do NOT derive anything from a closed edge's endpoints.
-- Do NOT tessellate inside L0-L2 crates to work around a hard face. Tessellation lives in operations (L3); core stays analytic (see CLAUDE.md, layer rules).
+- Do NOT tessellate inside L0-L2 crates to work around a hard face. Tessellation lives in operations (L3); core stays analytic (see AGENTS.md, layer rules).
 - Do NOT treat one passing deflection value as proof; sampling off-by-ones are deflection dependent.

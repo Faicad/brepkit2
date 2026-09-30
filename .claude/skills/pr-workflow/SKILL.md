@@ -24,7 +24,7 @@ End-to-end change flow for this repo: branch, commit, push, PR, AI review gate, 
 
 ## Hooks: what actually runs
 
-Hooks live in `.husky/`. Read the hook files themselves when in doubt; the "Git Conventions" section of CLAUDE.md describes an older pre-push behavior and the hook file is authoritative.
+Hooks live in `.husky/`. Read the hook files themselves when in doubt; the "Git Conventions" section of AGENTS.md describes an older pre-push behavior and the hook file is authoritative.
 
 - `pre-commit`: fmt, clippy, taplo, and cargo-machete run in parallel. No tests. Expect `✅ Pre-commit checks passed.` If it fails, fix and re-commit. Caveat: the hook silently skips taplo and cargo-machete when the binaries are not installed (`command -v` guards in `.husky/pre-commit`), so a passing hook does not prove TOML formatting or unused-dep cleanliness. Install both with `cargo install taplo-cli cargo-machete`.
 - `commit-msg`: runs commitlint (`@commitlint/config-conventional`, `commitlint.config.js`) but always exits 0: its not-installed fallback also swallows real lint failures, so violations print `✖` lines without blocking the commit. Treat any `✖` output as a hard failure and `git commit --amend` the message. Shape: `type(scope): subject`, e.g. `feat(render): screen-space adaptive LOD`. Nothing in CI lints messages either, so treat the `type(scope): subject` shape as a hard requirement.
@@ -86,7 +86,7 @@ Parallel work lives inside the repo under `.worktrees/` (gitignored):
 git worktree add .worktrees/<branch-name> <branch>
 ```
 
-Ignore the older `../feat-branch` sibling-directory form in CLAUDE.md; in-repo `.worktrees/` is the rule. Each worktree pushes and PRs independently with the same procedure above.
+Ignore the older `../feat-branch` sibling-directory form in AGENTS.md; in-repo `.worktrees/` is the rule. Each worktree pushes and PRs independently with the same procedure above.
 
 ## Release flow
 

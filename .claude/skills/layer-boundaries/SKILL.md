@@ -5,7 +5,7 @@ description: Use when adding a workspace dependency between brepkit2 crates, dec
 
 # Layer Boundaries
 
-brepkit2 is a strict layered DAG (L0 math up to L4 wasm/render). This skill covers: keeping the DAG intact, the safe procedure for adding `EdgeCurve`/`FaceSurface` variants, and where new code goes. The dependency table itself lives in CLAUDE.md, "Layer dependency rules". Do not restate it; check against it.
+brepkit2 is a strict layered DAG (L0 math up to L4 wasm/render). This skill covers: keeping the DAG intact, the safe procedure for adding `EdgeCurve`/`FaceSurface` variants, and where new code goes. The dependency table itself lives in AGENTS.md, "Layer dependency rules". Do not restate it; check against it.
 
 ## Quick reference
 
@@ -37,7 +37,7 @@ When it runs: CI only, as the `boundaries` job gated into `ci-pass` (`.github/wo
 Expect `✅ All crate boundaries valid.` and exit 0. On failure it prints one `VIOLATION:` line per bad dep and exits 1.
 
 Nuances:
-- The script's allowlist is slightly looser than the CLAUDE.md table: it permits `brepkit-geometry` for `algo`/`blend`, and a direct `brepkit-blend` dep for `wasm` (the table allows blend only transitively, via operations). None of these are used today. Treat the CLAUDE.md table as intent, the script as the floor. Passing the script but violating the table still gets flagged in review.
+- The script's allowlist is slightly looser than the AGENTS.md table: it permits `brepkit-geometry` for `algo`/`blend`, and a direct `brepkit-blend` dep for `wasm` (the table allows blend only transitively, via operations). None of these are used today. Treat the AGENTS.md table as intent, the script as the floor. Passing the script but violating the table still gets flagged in review.
 - No crate may depend on `brepkit-render`. It is an L4 leaf.
 
 ## Adding an EdgeCurve or FaceSurface variant
@@ -82,17 +82,17 @@ Put code in the lowest layer whose allowed deps suffice, except tessellation and
 | Boolean/classification engine internals | L2 `crates/algo/src/` |
 | Fillet/chamfer engine | L2 `crates/blend/src/` |
 | Healing, validation, properties, distance, solid offset, 2D constraints | L2 `heal` / `check` / `offset` / `sketch` |
-| User-facing modeling op, measure, tessellation | L3 `crates/operations/src/` (CLAUDE.md Recipe 3; see add-operation skill) |
-| New file format | L3 `crates/io/src/<format>/` (CLAUDE.md Recipe 2) |
+| User-facing modeling op, measure, tessellation | L3 `crates/operations/src/` (AGENTS.md Recipe 3; see add-operation skill) |
+| New file format | L3 `crates/io/src/<format>/` (AGENTS.md Recipe 2) |
 | GPU rendering or display meshing | L4 `crates/render/src/` (leaf) |
-| JS-facing API | L4 `crates/wasm/src/bindings/` (CLAUDE.md Recipe 4; see wasm-bindings skill) |
+| JS-facing API | L4 `crates/wasm/src/bindings/` (AGENTS.md Recipe 4; see wasm-bindings skill) |
 
-For the exact file within a crate, use the CLAUDE.md Module Map.
+For the exact file within a crate, use the AGENTS.md Module Map.
 
 ## Anti-patterns
 
 - Do NOT add a Cargo dep to silence an unresolved `use`. The unresolved import is the boundary working as intended.
-- Do NOT conclude "the script passed, so the layering is fine". The script is the floor; check the CLAUDE.md table for intent.
+- Do NOT conclude "the script passed, so the layering is fine". The script is the floor; check the AGENTS.md table for intent.
 - Do NOT add `_ =>` arms to make a variant-add compile faster. Silencing the compiler discards the checklist and creates silent misbehavior for the new variant.
 - Do NOT move an algorithm up a layer just because a convenient helper lives there. Extract or reimplement the helper at the lower layer instead.
 - Do NOT assume "no compile errors in math" means the analytic intersection work is done: `try_algebraic_intersection` ends in `_ => Ok(None)` and swallows new surface pairs silently.

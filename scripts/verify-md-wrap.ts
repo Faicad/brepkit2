@@ -24,7 +24,6 @@ const PATTERNS = [
   'docs/**/*.md',
   'crates/*/README.md',
   'AGENTS.md',
-  'CLAUDE.md',
 ]
 
 /** Exclude plans/, analysis/ and the vendored transplant root (not subject to wrap checking). */

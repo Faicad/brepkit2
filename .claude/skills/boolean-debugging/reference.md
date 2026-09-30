@@ -55,7 +55,7 @@ z=0), runs `boolean(Cut)` through the FULL operations gate, then prints:
 - `measure::solid_volume` vs the closed-form expected value
 
 Caveat: it iterates `outer_shell()` only. For hollow results, switch to
-`brepkit_topology::explorer::solid_faces` (CLAUDE.md, "Walking faces in a solid").
+`brepkit_topology::explorer::solid_faces` (AGENTS.md, "Walking faces in a solid").
 
 Extensions, in the order you usually need them:
 
@@ -88,7 +88,7 @@ testing skill. Boolean-specific rules on top of it:
    intermediate looks plausible and burns a full pass.
 2. Read back with `brepkit_io::step::reader::read_step(input: &str, &mut topo)`: it takes
    the file CONTENTS as `&str` and returns `Result<Vec<SolidId>, IoError>`, unlike the
-   generic reader shape in the CLAUDE.md cookbook.
+   generic reader shape in the AGENTS.md cookbook.
 3. **Gate: confirm the round-trip is analytic.** Run the face census (Rust `type_tag`, or
    tool-side `getSurfaceType`/`getEdgeCurveType`). Expect cylinder/cone/plane faces and
    Circle edges. NURBS where the source had analytics means the fixture is unfaithful and

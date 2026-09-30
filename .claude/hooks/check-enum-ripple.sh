@@ -10,7 +10,7 @@ FILE=$(jq -r '.tool_input.file_path // .tool_input.filePath // empty' 2>/dev/nul
 # Check if this is the EdgeCurve enum definition file
 if [[ "$FILE" == */topology/src/edge.rs ]]; then
   echo "🔔 RIPPLE-EFFECT REMINDER: You edited edge.rs (contains EdgeCurve enum)."
-  echo "   If you added/changed a variant, check all match sites in CLAUDE.md → 'Adding an EdgeCurve variant'"
+  echo "   If you added/changed a variant, check all match sites in AGENTS.md → 'Adding an EdgeCurve variant'"
   echo "   Key files: tessellate.rs, transform.rs, copy.rs, measure.rs, boolean.rs,"
   echo "   step/writer.rs, iges/writer.rs, kernel.rs (8 sites)"
 fi
@@ -18,7 +18,7 @@ fi
 # Check if this is the FaceSurface enum definition file
 if [[ "$FILE" == */topology/src/face.rs ]]; then
   echo "🔔 RIPPLE-EFFECT REMINDER: You edited face.rs (contains FaceSurface enum)."
-  echo "   If you added/changed a variant, check all match sites in CLAUDE.md → 'Adding a FaceSurface variant'"
+  echo "   If you added/changed a variant, check all match sites in AGENTS.md → 'Adding a FaceSurface variant'"
   echo "   Key files: tessellate.rs, transform.rs, copy.rs, section.rs, distance.rs,"
   echo "   boolean.rs (4 sites), step/writer.rs, iges/writer.rs, kernel.rs (8 sites)"
   echo "   ⚠️  offset_face.rs, step/writer.rs, iges/writer.rs have wildcard catch-alls!"

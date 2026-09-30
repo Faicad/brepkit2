@@ -2,7 +2,7 @@
 
 Distilled working knowledge for building, debugging, and shipping the brepkit2 B-Rep kernel:
 each skill captures the method and traps for one recurring class of task. Written for
-engineers and agents working in this repo, with only this repo and CLAUDE.md as context.
+engineers and agents working in this repo, with only this repo and AGENTS.md as context.
 
 ## Index
 

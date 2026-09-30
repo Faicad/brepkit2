@@ -23,7 +23,6 @@ const PATTERNS = [
   'docs/**/*.md',
   'crates/*/README.md',
   'AGENTS.md',
-  'CLAUDE.md',
   '.claude/skills/**/*.md',
 ]
 

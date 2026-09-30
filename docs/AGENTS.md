@@ -12,8 +12,8 @@ This file defines the documentation standard for the brepkit2 repository. Read t
 | Analysis | `docs/analysis/` | Technical analysis/comparison documents | No | No user requirements |
 | Agent Notes | `.agents/notes/` | Decision records: why, what was given up, alternatives | Yes | See [README.md](../.agents/notes/README.md) |
 | Skills | `.claude/skills/` | Reusable workflows | No | SKILL.md per skill |
-| Root instructions | `CLAUDE.md`, `AGENTS.md` | Session-level standing instructions | No (English only) | |
-| Subtree instructions | `*/CLAUDE.md`, `*/AGENTS.md` | Subtree-specific instructions | No (English only) | |
+| Root instructions | `AGENTS.md` | Session-level standing instructions | No (English only) | |
+| Subtree instructions | `*/AGENTS.md` | Subtree-specific instructions | No (English only) | |
 
 ## One home per fact
 
@@ -45,7 +45,7 @@ In-scope documents (standing docs, Agent Notes, README) must have:
 - `foo.zh.md` (Chinese)
 - `foo.i18n.yaml` (consistency record with git blob hashes)
 
-**Exceptions** (not in scope): `docs/plans/`, `docs/analysis/`, `book/src/`, `CLAUDE.md`, `AGENTS.md`, `docs/AGENTS.md`, `SKILL.md` files.
+**Exceptions** (not in scope): `docs/plans/`, `docs/analysis/`, `book/src/`, `AGENTS.md`, `docs/AGENTS.md`, `SKILL.md` files.
 
 See [docs/i18n/README.md](i18n/README.md) for the pairing contract.
 
@@ -60,8 +60,8 @@ See [docs/i18n/README.md](i18n/README.md) for the pairing contract.
 
 ## Non-`docs/plans/` documents must not reference `docs/plans/`
 
-`docs/plans/` documents are provisional: they record an in-session proposal, get archived monthly, and their status flips from 方案（未实施） to 已落地/已废弃. No document outside `docs/plans/` may reference or link to a `docs/plans/` document — a plan must never become a citation target. Every non-`docs/plans/` document is self-contained: standing facts live in standing docs, decision records in Agent Notes, and technical analysis in `docs/analysis/`. Mentioning the `docs/plans/` tier itself in governing text (this file, `CLAUDE.md`, `AGENTS.md`) is governance prose, not a reference.
+`docs/plans/` documents are provisional: they record an in-session proposal, get archived monthly, and their status flips from 方案（未实施） to 已落地/已废弃. No document outside `docs/plans/` may reference or link to a `docs/plans/` document — a plan must never become a citation target. Every non-`docs/plans/` document is self-contained: standing facts live in standing docs, decision records in Agent Notes, and technical analysis in `docs/analysis/`. Mentioning the `docs/plans/` tier itself in governing text (this file, `AGENTS.md`) is governance prose, not a reference.
 
 ## Checks
 
-Run `npm run doc-sync` before submitting any documentation change. It chains the per-document gates (links, wraps, pairing, Agent Note format, Mermaid, doc references, plans archiving state). `./scripts/check-doc-paths.sh` separately verifies every Rust source path named in `CLAUDE.md` and the skills still resolves.
+Run `npm run doc-sync` before submitting any documentation change. It chains the per-document gates (links, wraps, pairing, Agent Note format, Mermaid, doc references, plans archiving state). `./scripts/check-doc-paths.sh` separately verifies every Rust source path named in `AGENTS.md` and the skills still resolves.

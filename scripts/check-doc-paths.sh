@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Verify every Rust source path named in agent-facing docs still resolves.
 #
-# CLAUDE.md and the skill files are loaded as ground truth at the start of a
+# AGENTS.md and the skill files are loaded as ground truth at the start of a
 # session, so a path that has gone stale sends a session to a file that no
 # longer exists. Refactors that split a `foo.rs` into a `foo/` directory are
 # the usual cause and nothing else catches them.
@@ -12,7 +12,7 @@ set -euo pipefail
 # `nurbs/curve.rs` and `math/src/traits.rs` resolve.
 
 DOCS=(
-  "CLAUDE.md"
+  "AGENTS.md"
   .claude/skills/*.md
   .claude/skills/*/*.md
 )

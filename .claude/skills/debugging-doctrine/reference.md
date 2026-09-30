@@ -44,7 +44,7 @@ Expected volume: 14214.60
 
 Per-face signed volume is the sharpest tool here: a face contributing the wrong sign or a wildly wrong magnitude localizes the bad face immediately, where a total volume only says "something is off".
 
-Caveat: the example walks `outer_shell()` only. For hollow solids use `brepkit_topology::explorer::solid_faces` (see CLAUDE.md, "Walking faces in a solid").
+Caveat: the example walks `outer_shell()` only. For hollow solids use `brepkit_topology::explorer::solid_faces` (see AGENTS.md, "Walking faces in a solid").
 
 ### Edge-incidence dump (free / over-shared edges)
 

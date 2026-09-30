@@ -1,6 +1,6 @@
 # pr-workflow reference
 
-Deep catalog behind SKILL.md. Everything here was verified against the repo; when it disagrees with prose elsewhere (including CLAUDE.md's "Git Conventions"), the workflow files (`.husky/*`, `.github/workflows/*.yml`) are authoritative.
+Deep catalog behind SKILL.md. Everything here was verified against the repo; when it disagrees with prose elsewhere (including AGENTS.md's "Git Conventions"), the workflow files (`.husky/*`, `.github/workflows/*.yml`) are authoritative.
 
 ## CI jobs (`.github/workflows/ci.yml`)
 
@@ -137,7 +137,7 @@ Bumping wasm-bindgen is its own change with its own PR. Never bump it as a drive
 
 - "CI is green so the PR is done": review findings do not block CI. The gate is the review check completing plus findings addressed.
 - "The pre-push hook printed one line and passed, so the change is validated": the hook intentionally runs nothing. Validation is CI plus the local tests you ran yourself.
-- "CLAUDE.md says pre-push runs tests and cargo-deny": stale. The hook file delegates to CI; do not re-add local suites to it and do not cite the stale description.
+- "AGENTS.md says pre-push runs tests and cargo-deny": stale. The hook file delegates to CI; do not re-add local suites to it and do not cite the stale description.
 - "High-risk change, better wait for a human": no human gate exists. Address findings, then auto-merge.
 - "gh pr view showed no comments, so there are no findings": inline findings live on `pulls/<N>/comments` (the API), check both surfaces.
 - "The plan doc helps reviewers, commit it": working plans and specs never get committed.

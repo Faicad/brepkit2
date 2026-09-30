@@ -7,7 +7,7 @@ Symbol catalog for the verification ladder. All paths and symbols verified again
 ### Rung 1: entity counts and surface census
 
 - `brepkit_topology::explorer::solid_entity_counts(topo, solid) -> (faces, edges, vertices)`. Locate: `rg -n 'pub fn solid_entity_counts' crates/topology/src/explorer.rs`.
-- `brepkit_topology::explorer::solid_faces(topo, solid) -> Result<Vec<FaceId>, _>` flattens outer plus inner shells. Always use this over walking `outer_shell()` (see CLAUDE.md, Walking faces in a solid).
+- `brepkit_topology::explorer::solid_faces(topo, solid) -> Result<Vec<FaceId>, _>` flattens outer plus inner shells. Always use this over walking `outer_shell()` (see AGENTS.md, Walking faces in a solid).
 - Surface census: iterate `solid_faces`, call `FaceSurface::type_tag()` (an inherent method on the enum in `crates/topology/src/face.rs`). Edge equivalent: `EdgeCurve::type_tag()` in `crates/topology/src/edge.rs`.
 - Approximation census tool: `cargo run --release --example approx_census -p brepkit-operations` (source: `crates/operations/examples/approx_census.rs`). It installs a logger capturing `brepkit_approx`-target debug probes and reports, per operation, whether the result stayed analytic or which approximation path fired. Probe sites: `rg -n 'brepkit_approx' crates/operations/src/`.
 - Mesh-fallback tell: a clean analytic boolean of primitives yields roughly 3 to 80 faces with quadric surface types present. A mesh fallback yields hundreds to thousands of faces, all `plane`. Face count and census are the ONLY reliable tell; triangle count and validity both look normal after a fallback.

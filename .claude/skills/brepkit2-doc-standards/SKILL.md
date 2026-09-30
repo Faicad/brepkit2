@@ -10,7 +10,7 @@ When writing or editing documentation in the brepkit2 repository, follow these s
 - **Technical analysis** → `docs/analysis/`
 - **Decision record** → `.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md`
 - **Reusable workflow** → `.claude/skills/<skill-name>/SKILL.md`
-- **Session instructions** → `CLAUDE.md` / `AGENTS.md` (root or subtree)
+- **Session instructions** → `AGENTS.md` / `AGENTS.md` (root or subtree)
 
 ## Rules
 
