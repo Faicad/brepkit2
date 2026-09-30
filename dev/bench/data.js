@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790763822814,
+  "lastUpdate": 1790766356393,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -107,6 +107,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24850959,
             "range": "± 64504",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "3d55935634e94b2630812e06f0dde2f278944886",
+          "message": "docs: rename CLAUDE.md to AGENTS.md and update all references\n\nAdopt the AGENTS.md standard filename for project instructions.\nUpdate doc-path checker, verify scripts, hooks, skills, and i18n\npairing record accordingly. No content changes to the instructions.",
+          "timestamp": "2026-09-30T19:02:42+08:00",
+          "tree_id": "e3c9177358568d0cca23135b132a4aafbaf7dea5",
+          "url": "https://github.com/Faicad/brepkit2/commit/3d55935634e94b2630812e06f0dde2f278944886"
+        },
+        "date": 1790766355822,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 947458,
+            "range": "± 1388",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1029325,
+            "range": "± 1985",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 12117,
+            "range": "± 50",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 698908,
+            "range": "± 973",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 25249721,
+            "range": "± 306022",
             "unit": "ns/iter"
           }
         ]
