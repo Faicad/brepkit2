@@ -361,7 +361,6 @@ Quick reference — find the right file for any task:
 | 2D polygon operations | `bindings/polygon2d.rs` |
 | NURBS curve/surface manipulation | `bindings/nurbs.rs` |
 | Batch execution & dispatch | `bindings/batch.rs` |
-| Gridfinity integration tests | `bindings/gridfinity_tests.rs` |
 | **Proc macro crate** (`crates/wasm-macros/`) | |
 | `#[wasm_binding]` attribute (panic safety) | `wasm-macros/src/lib.rs` |
 

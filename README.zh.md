@@ -58,8 +58,6 @@ const step = kernel.exportStep(notched); // Uint8Array
 
 brepkit2 是一个从零开始用 Rust 编写的 B-Rep 实体建模内核。它以 WebAssembly 为目标平台，同一内核既能跑在浏览器里，也能跑在桌面端。`unsafe` 被 lint 拒绝，`unwrap` 和 `panic` 同样如此。所有公开操作都返回 `Result`。
 
-它源于开发 [gridfinitylayouttool.com](https://gridfinitylayouttool.com) 的经历——当时浏览器里可用的参数化 CAD 方案要么是专有的，要么是从大型 C++ 代码库编译而来的。
-
 几何是精确的。布尔运算在解析曲面和 NURBS 曲面上进行，并在运算全程保留这些曲面类型——圆柱经布尔运算后仍是圆柱，而不是一堆三角形。这使面数保持在较低水平，且往返转换无损。
 
 ## 状态
@@ -124,7 +122,7 @@ brepkit2 有意不做：
 - **不在内核中捆绑视口。** 内核输出精确几何与网格化网格；相机、光照与着色属于调用方（Three.js 之类）。可选的 `brepkit-render` crate 提供带 face-id 缓冲的离屏 wgpu 渲染，用于测试和无头验证，任何核心操作都不依赖它。
 - **不做刀路规划或切片。** 导出 STEP、STL 或 3MF，把输出交给 CAM 工具或切片器。
 - **不用网格建模。** 内核基于精确 B-Rep 几何。细分曲面、多边形网格与体素不在范围内。
-- **不提供 GUI。** brepkit2 是一个库。围绕它构建 UI（如 [gridfinitylayouttool.com](https://gridfinitylayouttool.com)）是应用程序的职责。
+- **不提供 GUI。** brepkit2 是一个库。围绕它构建 UI 是应用程序的职责。
 - **不模拟物理。** 测量（体积、面积、质心）包含在内。应力分析、碰撞检测与动力学不在其中。
 
 <a id="architecture"></a>
