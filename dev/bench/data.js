@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790766356393,
+  "lastUpdate": 1790767511462,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -161,6 +161,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 25249721,
             "range": "± 306022",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "3963ef381707a39e18a444a82f49063910afd6fa",
+          "message": "fix(ci): restore executable bit on shell scripts lost in fork import\n\nCI jobs Layer Boundaries and Doc Paths failed with exit 126\n(Permission denied) because scripts/*.sh were committed as 100644.\nRestore 100755 on all six shell scripts.",
+          "timestamp": "2026-09-30T19:22:56+08:00",
+          "tree_id": "6ca08b89df0d0375d8dae52ae5fe7eb267690dbe",
+          "url": "https://github.com/Faicad/brepkit2/commit/3963ef381707a39e18a444a82f49063910afd6fa"
+        },
+        "date": 1790767510740,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 794893,
+            "range": "± 1345",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 832072,
+            "range": "± 9126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 10182,
+            "range": "± 29",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 549235,
+            "range": "± 6197",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 20869876,
+            "range": "± 467601",
             "unit": "ns/iter"
           }
         ]
