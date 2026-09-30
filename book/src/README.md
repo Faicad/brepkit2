@@ -1,13 +1,13 @@
-# brepkit
+# brepkit2
 
-The B-Rep modeling engine behind [brepjs](https://github.com/andymai/brepjs),
-written in Rust and compiled to WebAssembly.
+A B-Rep modeling kernel in Rust, compiled to WebAssembly.
 
-brepkit is the computational backend that powers brepjs. It handles NURBS
-geometry, boolean operations, filleting, tessellation, and data exchange — in
-memory-safe Rust with first-class WASM support.
+brepkit2 is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream tag
+`v2.129.15`). It handles NURBS geometry, boolean operations, filleting,
+tessellation, and data exchange — in memory-safe Rust with first-class WASM
+support.
 
-## Why brepkit?
+## Why brepkit2?
 
 - **Pure Rust** — no C/C++ dependencies, no complex build systems
 - **WASM-first** — designed for browser and Node.js environments

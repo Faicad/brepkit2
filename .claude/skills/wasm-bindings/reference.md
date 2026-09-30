@@ -40,9 +40,9 @@ wasm-pack build crates/wasm --target nodejs --release
 
 Then temporarily change the alias target to `~/Git/brepkit/crates/wasm/pkg/brepkit_wasm.js` (plain nodejs build; only the xtask merge renames the entry to `.cjs`). Run the tests or bench, then revert the alias. This sidesteps npm install and the lockfile and lint-config churn that comes with it.
 
-### Full overlay: pnpm + Vite consumers (e.g. gridfinity-layout-tool)
+### Full overlay: pnpm + Vite consumers
 
-pnpm resolves through its `.pnpm` store, so `node_modules/brepkit-wasm/` is a link-like copy of `node_modules/.pnpm/brepkit-wasm@<ver>/node_modules/brepkit-wasm/`. Overlaying only one location silently loads the old build; Vite's dep-optimizer cache adds a second layer of staleness. The full recipe (copy into BOTH node_modules locations, `rm -rf node_modules/.vite*`, md5-verify all copies, restore with `pnpm install --force`) is owned by the parity-benchmarking skill, Procedure 2. Get the package contents from `crates/wasm/pkg/` after `cargo xtask wasm-build`, or unpack `npm pack brepkit-wasm@<ver>`. Alternative overlay check: probe for a binding key that only exists in the new build (`typeof kernel.myNewMethod === 'function'`).
+pnpm resolves through its `.pnpm` store, so a package directory under `node_modules/` is a link-like copy of `node_modules/.pnpm/<name>@<ver>/node_modules/<name>/`. Overlaying only one location silently loads the old build; Vite's dep-optimizer cache adds a second layer of staleness. The full recipe is: copy into BOTH `node_modules` locations, `rm -rf node_modules/.vite*`, md5-verify all copies, restore with `pnpm install --force`. Get the package contents from `crates/wasm/pkg/` after `cargo xtask wasm-build`, or unpack `npm pack @faicad/brepkit2-wasm@<ver>`. Alternative overlay check: probe for a binding key that only exists in the new build (`typeof kernel.myNewMethod === 'function'`).
 
 ## 3. dispatch_op anatomy
 

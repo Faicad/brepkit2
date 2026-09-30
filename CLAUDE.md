@@ -1,8 +1,13 @@
-# brepkit — Project Guidelines
+# brepkit2 — Project Guidelines
 
-brepkit is the B-Rep modeling engine behind brepjs. It provides the computational
-backend (geometry, booleans, tessellation, I/O) while brepjs provides the
-developer-facing TypeScript API.
+brepkit2 is a B-Rep modeling kernel: geometry, booleans, tessellation, and I/O,
+written in Rust and exposed to JavaScript through `brepkit-wasm`.
+
+This repository is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream
+tag `v2.129.15`). Crate names are unchanged from upstream on purpose — they are
+unpublished, so there is no registry conflict, and renaming them would touch
+every file in the workspace. The npm package is published separately as
+`@faicad/brepkit2-wasm` (see `xtask/src/wasm.rs::NPM_PKG_NAME`).
 
 ## Architecture
 

@@ -1,11 +1,11 @@
 ---
 name: pr-workflow
-description: Use when committing, pushing, opening, reviewing, or merging a pull request in brepkit, or when a git hook fails, a push hangs, commitlint flags a message, a PR sits waiting on AI review, or parallel work needs a worktree. Covers hooks, conventional commits, the AI-review merge gate, the sandbox HTTPS push, and release-please.
+description: Use when committing, pushing, opening, reviewing, or merging a pull request in brepkit, or when a git hook fails, a push hangs, commitlint flags a message, a PR sits waiting on AI review, or parallel work needs a worktree. Covers hooks, conventional commits, the AI-review merge gate, and the sandbox HTTPS push.
 ---
 
 # PR Workflow
 
-End-to-end change flow for this repo: branch, commit, push, PR, AI review gate, squash-merge, release. Main is protected; every change lands as a squash-merged PR. There is no human approval gate: the AI review check is the gate.
+End-to-end change flow for this repo: branch, commit, push, PR, AI review gate, squash-merge. Main is protected; every change lands as a squash-merged PR. There is no human approval gate: the AI review check is the gate.
 
 ## Quick reference
 
@@ -14,10 +14,10 @@ End-to-end change flow for this repo: branch, commit, push, PR, AI review gate, 
 | Branch | `git checkout -b <type>/<kebab-description>` (e.g. `feat/render-lod`, `fix/ci-crates-io-flake`) |
 | Local gate before push | `cargo nextest run -p <touched-crate>` and, if any `Cargo.toml` changed, `./scripts/check-boundaries.sh` |
 | Compliance grep | See "Banned-name compliance" below |
-| Push (sandbox) | `git push "https://x-access-token:$(gh auth token)@github.com/andymai/brepkit.git" <branch>` |
+| Push (sandbox) | `git push "https://x-access-token:$(gh auth token)@github.com/Faicad/brepkit2.git" <branch>` |
 | Verify remote head | `gh pr view <N> --json headRefOid` (never `git rev-parse origin/<branch>`) |
 | Review-gate poll | `gh pr checks <N>` until the `cubic · AI code reviewer` check is completed |
-| Read findings | `gh api repos/andymai/brepkit/pulls/<N>/comments` and `gh pr view <N> --comments` |
+| Read findings | `gh api repos/Faicad/brepkit2/pulls/<N>/comments` and `gh pr view <N> --comments` |
 | Merge | `gh pr merge <N> --squash --auto` (only after findings are addressed) |
 | Post-merge | `git checkout main && git pull --ff-only` |
 | Worktree | `git worktree add .worktrees/<branch-name> <branch>` |
@@ -27,7 +27,7 @@ End-to-end change flow for this repo: branch, commit, push, PR, AI review gate, 
 Hooks live in `.husky/`. Read the hook files themselves when in doubt; the "Git Conventions" section of CLAUDE.md describes an older pre-push behavior and the hook file is authoritative.
 
 - `pre-commit`: fmt, clippy, taplo, and cargo-machete run in parallel. No tests. Expect `✅ Pre-commit checks passed.` If it fails, fix and re-commit. Caveat: the hook silently skips taplo and cargo-machete when the binaries are not installed (`command -v` guards in `.husky/pre-commit`), so a passing hook does not prove TOML formatting or unused-dep cleanliness. Install both with `cargo install taplo-cli cargo-machete`.
-- `commit-msg`: runs commitlint (`@commitlint/config-conventional`, `commitlint.config.js`) but always exits 0: its not-installed fallback also swallows real lint failures, so violations print `✖` lines without blocking the commit. Treat any `✖` output as a hard failure and `git commit --amend` the message. Shape: `type(scope): subject`, e.g. `feat(render): screen-space adaptive LOD`. Nothing in CI lints messages either, and release-please parses the squash-commit title (the PR title), so a malformed title silently skips the version bump.
+- `commit-msg`: runs commitlint (`@commitlint/config-conventional`, `commitlint.config.js`) but always exits 0: its not-installed fallback also swallows real lint failures, so violations print `✖` lines without blocking the commit. Treat any `✖` output as a hard failure and `git commit --amend` the message. Shape: `type(scope): subject`, e.g. `feat(render): screen-space adaptive LOD`. Nothing in CI lints messages either, so treat the `type(scope): subject` shape as a hard requirement.
 - `pre-push`: prints one info line and exits 0. Validation is deliberately delegated to CI (`.github/workflows/ci.yml`). Do not re-add local test runs to this hook, and do not treat its emptiness as a reason to skip local testing: run touched-crate tests yourself before pushing.
 
 Hard rules:
@@ -47,7 +47,7 @@ Hard rules:
 
 ## The review gate
 
-Branch protection requires only `CI Pass`. The AI review check (`cubic · AI code reviewer`; Greptile no longer runs on this repo) is NOT required by branch protection, so the PR can show mergeable while unread findings sit on it. Policy, not GitHub, enforces the gate:
+Branch protection requires only `CI Pass`. The AI review check (`cubic · AI code reviewer`) is NOT required by branch protection, so the PR can show mergeable while unread findings sit on it. Policy, not GitHub, enforces the gate:
 
 1. After `gh pr create`, work on the next independent task. Reviewers (cubic, Copilot) comment within roughly 5 to 7 minutes.
 2. Poll until the review check completes:
@@ -56,7 +56,7 @@ Branch protection requires only `CI Pass`. The AI review check (`cubic · AI cod
      --jq '.statusCheckRollup[] | select(.name=="cubic · AI code reviewer") | .status'
    ```
    Expect `COMPLETED` (its conclusion is `NEUTRAL` even with no findings — that is a pass, not a failure). Verify the reviewer ran against your CURRENT head before trusting a clean result: a stale review from an earlier push reports on files your latest commit did not touch. `CI Pass` does not appear in the rollup at all until every job it gates on finishes, so its absence is not a failure either. Any poll keyed to a check name that does not exist stays silent forever and reads exactly like "no findings" — list the rollup unfiltered once before trusting a filter. A background watcher may poll for this, but it must hand control back for the next step, never merge on its own.
-3. Read every inline finding: `gh api repos/andymai/brepkit/pulls/<N>/comments`. Fix P0/P1 findings (push a follow-up commit, which restarts CI). Reply to lower-severity findings with a reasoned response.
+3. Read every inline finding: `gh api repos/Faicad/brepkit2/pulls/<N>/comments`. Fix P0/P1 findings (push a follow-up commit, which restarts CI). Reply to lower-severity findings with a reasoned response.
 4. Only then: `gh pr merge <N> --squash --auto`. Auto-merge fires once `CI Pass` is green.
 5. This applies to every PR including high-risk core changes (GFA boolean engine, public WASM API). No human review step exists; review-check completion plus addressed findings is the whole gate.
 
@@ -76,7 +76,7 @@ git diff main... --name-only | xargs -r rg -n -i "$banned"
 git log main.. --format='%s%n%b' | rg -n -i "$banned"
 ```
 
-Pass condition: no output (rg exits 1). Grandfathered files that legitimately contain the names: `README.md`, `CHANGELOG.md`, `crates/wasm/CHANGELOG.md`, `scripts/bench-compare.sh`, `scripts/bench-report.ts`, `scripts/parity-loop.sh`. Do not add new occurrences anywhere, and do not "clean up" the grandfathered ones. Reading the reference kernel's source locally to study an approach is fine; naming it in committed text is not. For benchmark instructions, point at the brepjs harness scripts by path instead (see the parity-benchmarking skill).
+Pass condition: no output (rg exits 1). Grandfathered files that legitimately contain the names: `README.md`, `scripts/bench-report.ts`. Do not add new occurrences anywhere, and do not "clean up" the grandfathered ones. Reading the reference kernel's source locally to study an approach is fine; naming it in committed text is not.
 
 ## Worktrees
 
@@ -90,7 +90,11 @@ Ignore the older `../feat-branch` sibling-directory form in CLAUDE.md; in-repo `
 
 ## Release flow
 
-release-please (`.github/workflows/publish.yml`) maintains a pending `chore(main): release X.Y.Z` PR. Merging a `feat`/`fix`/`perf` PR updates it; merging the release PR itself tags, creates the GitHub release, and publishes the wasm package to npm. `docs`/`chore` commits and changes under excluded paths (`.github`, `scripts`, `benches`, `examples`, and similar) do not bump the version. Cross-repo consumption by brepjs: see the release-flow skill. Details and manual escape hatch: [reference.md](reference.md), "Release-please".
+There is no automated release pipeline in this fork. Versions in
+`crates/wasm/Cargo.toml` and `CHANGELOG.md` are bumped by hand, and the npm
+package `@faicad/brepkit2-wasm` is published manually with
+`cargo xtask wasm-publish` once a release is cut. Do not reintroduce
+release-please automation or the upstream bot secrets it depended on.
 
 ## CI failures you did not cause
 

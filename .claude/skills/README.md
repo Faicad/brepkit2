@@ -1,9 +1,8 @@
-# brepkit Skill Library
+# brepkit2 Skill Library
 
-Distilled working knowledge for building, debugging, and shipping the brepkit B-Rep kernel:
+Distilled working knowledge for building, debugging, and shipping the brepkit2 B-Rep kernel:
 each skill captures the method and traps for one recurring class of task. Written for
-engineers and agents working in this repo (plus `~/Git/brepjs` for cross-repo work), with
-only this repo and CLAUDE.md as context.
+engineers and agents working in this repo, with only this repo and CLAUDE.md as context.
 
 ## Index
 
@@ -24,16 +23,14 @@ only this repo and CLAUDE.md as context.
 | [render-verify](render-verify/SKILL.md) | Working on `brepkit-render` or visually verifying a solid, including headless capture of a live viewer window. |
 | [testing](testing/SKILL.md) | Writing or placing tests, building a faithful regression fixture, handling golden mismatches, or ending a session with unverified work. |
 | [profiling](profiling/SKILL.md) | An operation or benchmark is slow, a criterion bench misbehaves, or a PR needs before/after perf numbers. |
-| [parity-benchmarking](parity-benchmarking/SKILL.md) | Proving brepkit matches or beats the reference kernel, overlaying a local build into the gridfinity tool, or quoting any perf or parity claim. |
 | [pr-workflow](pr-workflow/SKILL.md) | Committing, pushing, opening, or merging a PR; hook failures, commitlint, the AI-review merge gate, worktrees. |
-| [release-flow](release-flow/SKILL.md) | Landing a merged brepkit change in brepjs: npm release, wasm pin bump, type sync, adapter update. |
 
 ## Suggested reading order for a new engineer
 
 1. Doctrine and verification: `roadmap`, `debugging-doctrine`, `solid-verification`, `numerical-robustness`, `testing`.
 2. The engine: `boolean-debugging`, `fillet-blend`, `analytic-preservation`, `tessellation`.
 3. Building: `layer-boundaries`, `add-operation`, `wasm-bindings`, `io-formats`, `render-verify`.
-4. Shipping: `pr-workflow`, `profiling`, `parity-benchmarking`, `release-flow`.
+4. Shipping: `pr-workflow`, `profiling`.
 
 ## Glossary
 
@@ -52,4 +49,4 @@ only this repo and CLAUDE.md as context.
 - **Seam**: the edge where a closed surface's parameterization wraps around (u=0 meets u=2*pi on a cylinder). Seam edges appear twice in a face's UV boundary.
 - **Periodic surface**: a surface closed in one or both parameter directions (cylinder, cone, sphere, torus). Periodic wrap-around is a standing source of seam and interval bugs.
 - **Deflection**: the maximum allowed chord deviation between a mesh and the true surface; the knob that controls tessellation density.
-- **The reference kernel**: the established C++ CAD kernel brepkit benchmarks against through the brepjs harness. Parity with it, then beating it, is the project's acceptance bar; see `parity-benchmarking` for how to run the head-to-head.
+- **The reference kernel**: the established C++ CAD kernel brepkit is measured against. Parity with it, then beating it, is the project's acceptance bar; the head-to-head harness is upstream-only, so in-fork evidence is `cargo bench-fast` plus the `boolean_tracking` CI trend (see `profiling`).

@@ -7,7 +7,7 @@ description: Use when investigating or fixing performance in brepkit: a benchmar
 
 ## The bar
 
-brepkit must beat the reference kernel on performance, not merely pass tests. Perf regressions are release blockers. CI runs `boolean_tracking` on a shared runner and only comments on regressions over 200% (`.github/workflows/benchmark.yml`, `fail-on-alert: false`), so the automated gate is looser than the real bar. You are the gate: any PR touching a hot path pastes before/after criterion numbers in its body. Cross-kernel claims require `./scripts/bench-compare.sh ~/Git/brepjs` output, not native-only numbers (see the parity-benchmarking skill).
+brepkit must beat the reference kernel on performance, not merely pass tests. Perf regressions are release blockers. CI runs `boolean_tracking` on a shared runner and only comments on regressions over 200% (`.github/workflows/benchmark.yml`, `fail-on-alert: false`), so the automated gate is looser than the real bar. You are the gate: any PR touching a hot path pastes before/after criterion numbers in its body. The cross-kernel harness that upstream used is not part of this fork, so cross-kernel numbers are not reproducible here; do not quote upstream's figures as this fork's results.
 
 ## Quick reference
 
@@ -19,7 +19,6 @@ cargo flamegraph --profile profiling --bench cad_operations -p brepkit-operation
   -o /tmp/flamegraph.svg -- --bench "<filter>"            # flamegraph a specific criterion bench
 cargo run --profile profiling --example profile_boolean -- honeycomb   # per-phase boolean timing
 cargo run --profile profiling --example tess_profile      # tessellation drill-down (64-hole plate)
-./scripts/bench-compare.sh ~/Git/brepjs                   # native + wasm vs the reference kernel
 ```
 
 The `[profile.profiling]` block in the workspace `Cargo.toml` is release optimization plus debug symbols with `lto = false`: fast rebuilds, full symbol names in flamegraphs. Always profile with it, never with plain `release` (LTO mangles frames) or `dev` (measures nothing real).
@@ -28,7 +27,7 @@ Bench files (`crates/operations/benches/`), one line each:
 
 | Bench | Covers |
 |---|---|
-| `cad_operations.rs` | Head-to-head suite (`fuse(box,box) x10`, `mesh sphere (tol=0.01)`, `tessellate 64-hole plate`, ...); paired with `brepjs/benchmarks/kernel-comparison.bench.test.ts` via the `NAME_MAP` table in `scripts/bench-report.ts`, so a new head-to-head bench must be added to that table or it will not appear in the comparison report |
+| `cad_operations.rs` | Head-to-head suite (`fuse(box,box) x10`, `mesh sphere (tol=0.01)`, `tessellate 64-hole plate`, ...); paired with the upstream JS suite via the `NAME_MAP` table in `scripts/bench-report.ts`, so a new head-to-head bench must be added to that table or it will not appear in the comparison report |
 | `boolean_perf.rs` | Boolean scaling: `sequential_cylinder_cuts/N={4,16,64}` and `single_boolean_at_face_count` |
 | `boolean_tracking.rs` | Small fast suite CI tracks for trend (`boolean/cut_cylinder_through_box`, `boolean/perforated_cut_36`) |
 | `compound_cut_perf.rs` | `compound_cut` vs sequential cuts: cylinder grids and honeycomb grids |
@@ -56,7 +55,7 @@ Bench files (`crates/operations/benches/`), one line each:
 
 - A hung or 100x-variance bench does NOT mean "the algorithm is slow". Rule out nondeterminism (class B) first with the fresh-Topology timed loop.
 - A green CI benchmark run does NOT mean no regression. The alert threshold is 200% and it only comments. Compare criterion output yourself.
-- Native criterion wins do NOT prove "beats the reference kernel". Only `bench-compare.sh` output does; wasm behaves differently.
+- Native criterion wins say nothing about the WASM target, which is single-threaded and behaves differently. Re-measure on the WASM build before claiming a cross-target win.
 - Do NOT profile with `--release` (LTO destroys symbols) or trust `dev`-profile timings at all.
 - Do NOT "fix" a scaling problem by making each pairwise call faster. If cost grows with accumulator size, the fix is batching or disjointness detection, not micro-optimization.
 - Do NOT paste historical numbers from old PRs as expected timings. Re-measure on the current machine and commit.
@@ -64,5 +63,5 @@ Bench files (`crates/operations/benches/`), one line each:
 
 ## Deep detail
 
-- [reference.md](reference.md): full command catalog, bug classes A-D with verified symbols and rg patterns, `bench-compare.sh` pipeline, profiling-example internals, glossary.
-- Sibling skills: parity-benchmarking (cross-kernel harness), tessellation (deflection semantics), boolean-debugging (when the slow path is also wrong), debugging-doctrine (bisection discipline), pr-workflow (getting the numbers merged).
+- [reference.md](reference.md): full command catalog, bug classes A-D with verified symbols and rg patterns, profiling-example internals, glossary.
+- Sibling skills: tessellation (deflection semantics), boolean-debugging (when the slow path is also wrong), debugging-doctrine (bisection discipline), pr-workflow (getting the numbers merged).

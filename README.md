@@ -4,10 +4,18 @@
 
 Solid modeling kernel for Rust and WebAssembly.
 
-[![CI](https://github.com/andymai/brepkit/actions/workflows/ci.yml/badge.svg)](https://github.com/andymai/brepkit/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/brepkit-wasm)](https://www.npmjs.com/package/brepkit-wasm)
-[![Last release](https://img.shields.io/github/release-date/andymai/brepkit?label=last%20release)](https://github.com/andymai/brepkit/releases)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/andymai/brepkit?label=commits%2Fmonth)](https://github.com/andymai/brepkit/commits/main)
+> **This is a fork.** `brepkit2` is an independent fork of
+> [brepkit](https://github.com/andymai/brepkit) by Andy Mai, taken at upstream
+> tag `v2.129.15` (2026-08-07) and developed independently since. Upstream is
+> dual-licensed MIT OR Apache-2.0; this fork keeps that licensing, the original
+> copyright notices, and the crate names. It is not affiliated with or endorsed
+> by the upstream author. Changes land here first — see
+> [CHANGELOG.md](CHANGELOG.md).
+
+[![CI](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml/badge.svg)](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@faicad/brepkit2-wasm)](https://www.npmjs.com/package/@faicad/brepkit2-wasm)
+[![Last release](https://img.shields.io/github/release-date/Faicad/brepkit2?label=last%20release)](https://github.com/Faicad/brepkit2/releases)
+[![Commit activity](https://img.shields.io/github/commit-activity/m/Faicad/brepkit2?label=commits%2Fmonth)](https://github.com/Faicad/brepkit2/commits/main)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/) [![unsafe denied](https://img.shields.io/badge/unsafe-denied-success.svg)](#why-a-cad-kernel)
 
@@ -38,7 +46,7 @@ let step = write_step(&topo, &[notched])?;
 ```
 
 ```js
-import { BrepKernel } from 'brepkit-wasm';
+import { BrepKernel } from '@faicad/brepkit2-wasm';
 
 const kernel = new BrepKernel();
 
@@ -144,7 +152,7 @@ Layered Cargo workspace. Each crate depends only on the same or lower layers, an
 
 ## Performance
 
-Median times from the [brepjs benchmark suite](https://github.com/andymai/brepjs/tree/main/benchmarks) (5 iterations, Node.js, Linux x86_64). WASM is single-threaded. Native benchmarks use criterion.
+Median times inherited from the upstream benchmark suite (5 iterations, Node.js, Linux x86_64). WASM is single-threaded. Native benchmarks use criterion.
 
 | Operation                | brepkit (WASM) | OCCT (WASM) | Speedup | brepkit (native) |
 | ------------------------ | -------------- | ----------- | ------- | ---------------- |
@@ -160,7 +168,7 @@ Every quoted row is output-verified across both kernels before timing is compare
 
 Booleans preserve analytic surfaces, so face counts stay low across chained operations. A nine-step compound boolean settles at 72 faces while a mesh-based approach would reach roughly 7,000. The same holds for blends: a straight edge filleted between two planar faces keeps an exact cylindrical wall rather than a NURBS approximation of one.
 
-> The OCCT comparison uses [occt-wasm](https://www.npmjs.com/package/occt-wasm), an OpenCASCADE build compiled to WebAssembly. Both kernels run single-threaded in Node.js. Boolean and `exportSTEP` rows are timed as batches of ten operations. WASM figures are medians of `kernel-comparison.bench.test.ts` (5 iterations) against a local `cargo xtask wasm-build` package, hash-verified at the require path. Native figures: `cargo bench -p brepkit-operations --bench cad_operations`, except the mesh-sphere row, which is measured at the same parameters as the WASM row (`tessellate_solid_with_tolerance`, deflection 0.01, angular 0.1 rad) via `crates/operations/examples/perf_probe.rs` — the criterion suite's sphere case meshes per-face and is not comparable. Full benchmark source: [brepjs/benchmarks](https://github.com/andymai/brepjs/tree/main/benchmarks). Measured 2026-08-06 on brepkit main (post-2.129.8, with the display-sphere tessellation fix).
+> The OCCT comparison uses [occt-wasm](https://www.npmjs.com/package/occt-wasm), an OpenCASCADE build compiled to WebAssembly. Both kernels run single-threaded in Node.js. Boolean and `exportSTEP` rows are timed as batches of ten operations. WASM figures are medians of `kernel-comparison.bench.test.ts` (5 iterations) against a local `cargo xtask wasm-build` package, hash-verified at the require path. Native figures: `cargo bench -p brepkit-operations --bench cad_operations`, except the mesh-sphere row, which is measured at the same parameters as the WASM row (`tessellate_solid_with_tolerance`, deflection 0.01, angular 0.1 rad) via `crates/operations/examples/perf_probe.rs` — the criterion suite's sphere case meshes per-face and is not comparable. Measured 2026-08-06 on upstream brepkit main (post-2.129.8, with the display-sphere tessellation fix); the harness that produced these numbers is not part of this fork, so re-measure with `cargo bench -p brepkit-operations --bench cad_operations` before quoting them.
 
 ## Data Exchange
 
@@ -185,17 +193,17 @@ Mesh formats export tessellated triangles. glTF is binary `.glb`, with no materi
 ### As a WASM package
 
 ```bash
-npm install brepkit-wasm
+npm install @faicad/brepkit2-wasm
 ```
 
 ```js
-import { BrepKernel } from 'brepkit-wasm';
+import { BrepKernel } from '@faicad/brepkit2-wasm';
 
 const kernel = new BrepKernel();
 const solid = kernel.makeBox(10, 20, 30);
 ```
 
-For a higher-level TypeScript API, see [brepjs](https://github.com/andymai/brepjs).
+This fork does not ship a higher-level TypeScript API.
 
 ### As a Rust dependency
 
@@ -203,10 +211,10 @@ Not yet published to crates.io. Use git dependencies for now:
 
 ```toml
 [dependencies]
-brepkit-math = { git = "https://github.com/andymai/brepkit" }
-brepkit-topology = { git = "https://github.com/andymai/brepkit" }
-brepkit-operations = { git = "https://github.com/andymai/brepkit" }
-brepkit-io = { git = "https://github.com/andymai/brepkit" }        # optional
+brepkit-math = { git = "https://github.com/Faicad/brepkit2" }
+brepkit-topology = { git = "https://github.com/Faicad/brepkit2" }
+brepkit-operations = { git = "https://github.com/Faicad/brepkit2" }
+brepkit-io = { git = "https://github.com/Faicad/brepkit2" }        # optional
 ```
 
 ### Building from source
@@ -242,10 +250,7 @@ Broad directions, no dates.
 
 ## Projects Using brepkit
 
-- [brepjs](https://github.com/andymai/brepjs), CAD modeling for JavaScript.
-- [Gridfinity Layout Tool](https://github.com/andymai/gridfinity-layout-tool), a web-based Gridfinity storage layout generator.
-
-[Open a PR](https://github.com/andymai/brepkit/pulls) to add your project.
+[Open a PR](https://github.com/Faicad/brepkit2/pulls) to add your project.
 
 ## License
 

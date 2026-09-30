@@ -10,8 +10,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/andymai/brepkit.git
-cd brepkit
+git clone https://github.com/Faicad/brepkit2.git
+cd brepkit2
 
 # Build all Rust crates
 cargo build --workspace
@@ -25,15 +25,15 @@ cargo build -p brepkit-wasm --target wasm32-unknown-unknown
 
 ## Using from JavaScript and TypeScript
 
-The maintained JS surface is the `brepkit-wasm` package, built from
+The maintained JS surface is the `@faicad/brepkit2-wasm` package, built from
 `crates/wasm`. It ships its own TypeScript declarations.
 
 ```bash
-npm install brepkit-wasm
+npm install @faicad/brepkit2-wasm
 ```
 
 ```typescript
-import { BrepKernel } from 'brepkit-wasm';
+import { BrepKernel } from '@faicad/brepkit2-wasm';
 
 const kernel = new BrepKernel();
 const solid = kernel.makeBox(10, 20, 30);

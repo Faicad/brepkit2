@@ -36,7 +36,7 @@ rg -n -A2 '#\[ignore' crates/    # filter the 3 doc-comment false hits by hand
 Replace the incumbent kernel in the gridfinity layout tool (`~/Git/gridfinity-layout-tool`)
 at full parity, across all its generator scenarios: 100% triangle correctness, volume
 correctness, manifold correctness, AND generation performance at least as good. Parity
-first, then beating it, is the acceptance bar. See `parity-benchmarking` for the harness.
+first, then beating it, is the acceptance bar. The harness that measured this is upstream-only and is not part of this fork.
 
 Head-to-head (wasm vs wasm, 2026-08-06, current kernel hash-verified overlaid into the bench harness — NOTE: the harness's vitest resolve.alias does NOT reach the CJS require path, so overlay node_modules and hash-verify; an alias-only run silently benches the installed kernel): brepkit leads every row — fuse(box,box) 87x, cut(box,cyl) 2.3x, chamfer 27x, fillet 21x, multi-boolean 6.4x, mesh box 5x, mesh sphere 7.3x (was 1.4x; the display-sphere curvature-floor removal, #1389 — sphere density now matches the reference at equal tolerance, 9,800 vs 10,176 tris), transforms ~4x, volume 47x (re-measured 2026-08-07 on released 2.129.13, hash-verified overlay in a brepjs bench worktree: 0.176 ms vs 8.31 ms per 100 calls — the exact all-planar divergence path #1396; was 2.3x), bbox 3x, STEP export 16x. Equivalence verified per row (volume oracle both kernels): fuse/chamfer/sphere exact, cut/fillet/multi-boolean within 0.004%; the intersect row stays DISQUALIFIED (wrong region, pinned below). Native criterion CAVEAT: the cad_operations "mesh sphere" case tessellates PER-FACE through a bench-local shim (boundary-locked, ~40x lighter than the solid-level path the wasm row exercises) — never compare it against solid-level numbers; perf_probe measures the matching-parameter native figure. Where parity stands: gridfinity bin parity reached; all four primitive-boolean
 mesh-fallbacks are exact analytic and beat the reference kernel 2.9-9.5x head to head;
@@ -70,7 +70,7 @@ recipes"). A family that fails in seconds is failing pre-geometry.
    scoop case for exactly this reason.
 4. **After ANY GFA or boolean change, re-probe scenario face counts before claiming
    anything.** Scorecards rot silently; a stale one once hid a regression through a
-   whole release. This is mandatory, not optional (see `parity-benchmarking`).
+   whole release. This is mandatory, not optional.
 
 ## TERMINAL cases: do not re-attempt without the named missing primitive
 
@@ -665,8 +665,8 @@ old parked branch `fix/kumiko-corner-window-cut` is GONE from the remote (its 5
 roots remain unshipped, and re-attempting them means re-capturing fixtures first. The
 thickwall ready-repro still aborts identically on the new machinery (`open hole shell with 9
 faces`, pre-shell-fix operands — re-capture before drawing conclusions). TOOL-SIDE RE-PROBE DONE
-2026-08-04 on the post-campaign kernel (wasm built `--skip-opt`, deployed via the
-`parity-loop.sh` copy step; bypass pnpm's dep check by invoking
+2026-08-04 on the post-campaign kernel (wasm built `--skip-opt`, overlaid into
+the tool; bypass pnpm's dep check by invoking
 `./node_modules/.bin/vitest` directly or the purge prompt clobbers the copied kernel):
 `gomaBoundaryProbe`, `kumikoNubProbe`, `dividerCrossLap`, `honeycombManifoldCheck` — 4 files,
 8/8 tests green in 53 s. Note the tool's test files were RENAMED since the recipes below were
@@ -901,9 +901,10 @@ Every box before "closed":
 - [ ] **Regression fixture shipped** with the fix (STEP or arena `.bin`; see `testing`).
 - [ ] **Census clean or improved:** the row flips FALLBACK to analytic
       (`cargo run --release --example approx_census -p brepkit-operations`).
-- [ ] **Head-to-head timing at least parity** (the brepjs wasm bench; see
-      `parity-benchmarking`).
-- [ ] **Release published** when user-facing (see `release-flow`).
+- [ ] **Head-to-head timing at least parity** (no in-fork harness; re-measure with
+      `cargo bench-fast` and do not quote upstream figures).
+- [ ] **Release published** when user-facing (bump `crates/wasm/Cargo.toml` by hand,
+      then `cargo xtask wasm-publish`).
 
 ## Anti-patterns
 
@@ -918,7 +919,6 @@ Every box before "closed":
 
 ## Related skills
 
-`analytic-preservation` (the chase filters in depth), `parity-benchmarking` (the
-scenario re-probe and head-to-head), `debugging-doctrine` (before any multi-pass dig),
-`solid-verification` (the acceptance oracles), `testing` (fixtures and ready-repros),
-`fillet-blend` (the blend traps), `release-flow` (shipping a user-facing close).
+`analytic-preservation` (the chase filters in depth), `debugging-doctrine` (before any
+multi-pass dig), `solid-verification` (the acceptance oracles), `testing` (fixtures
+and ready-repros), `fillet-blend` (the blend traps), `profiling` (the perf bar).

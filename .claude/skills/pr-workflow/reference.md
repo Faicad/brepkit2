@@ -24,7 +24,7 @@ All jobs except `wasm-size` fan into `ci-pass` (display name `CI Pass`), the onl
 
 Local pre-commit covers only fmt, clippy, taplo, machete, and the last two only when the binaries are installed (the hook skips them silently otherwise). Everything else (tests, boundaries, deny, docs) first runs in CI unless you run it yourself. Before pushing, run at minimum the tests for touched crates and, on any `Cargo.toml` change, `./scripts/check-boundaries.sh`.
 
-## Repo merge settings (verified via `gh api repos/andymai/brepkit`)
+## Repo merge settings (verified via `gh api repos/Faicad/brepkit2`)
 
 - `allow_squash_merge: true`; merge commits and rebase merges disabled.
 - `allow_auto_merge: true`; `delete_branch_on_merge: true`.
@@ -42,7 +42,7 @@ Local pre-commit covers only fmt, clippy, taplo, machete, and the last two only 
 Reading findings:
 
 ```bash
-gh api repos/andymai/brepkit/pulls/<N>/comments   # inline (diff-anchored) comments
+gh api repos/Faicad/brepkit2/pulls/<N>/comments   # inline (diff-anchored) comments
 gh pr view <N> --comments                          # issue-level comments
 ```
 
@@ -50,11 +50,11 @@ Triage: P0/P1 findings get a fix commit before auto-merge is set. P2 and style f
 
 ## Sandbox push details
 
-- `origin` is `git@github.com:andymai/brepkit.git`; SSH to github.com:22 is blocked, so plain `git push` hangs until timeout.
+- `origin` is `git@github.com:Faicad/brepkit2.git`; SSH to github.com:22 is blocked, so plain `git push` hangs until timeout.
 - Global rewrite trap: `git config --get-regexp 'url\..*insteadof'` shows `url.git@github.com:.insteadof https://github.com/`. This silently converts even an explicit `git push https://github.com/...` back to SSH. The token-embedded URL avoids the rewrite because it does not match the prefix:
 
 ```bash
-git push "https://x-access-token:$(gh auth token)@github.com/andymai/brepkit.git" <branch> \
+git push "https://x-access-token:$(gh auth token)@github.com/Faicad/brepkit2.git" <branch> \
   2>&1 | sed 's/x-access-token:[^@]*@/x-access-token:***@/g'
 ```
 
@@ -62,21 +62,20 @@ git push "https://x-access-token:$(gh auth token)@github.com/andymai/brepkit.git
 
 ```bash
 gh pr view <N> --json headRefOid --jq .headRefOid
-gh api repos/andymai/brepkit/commits/<branch> --jq .sha
+gh api repos/Faicad/brepkit2/commits/<branch> --jq .sha
 ```
 
 Do not conclude "push failed" or "remote is behind" from `git rev-parse origin/<branch>`; that ref is stale by construction here.
 
 - All `gh` operations (create, view, merge, api) go over HTTPS with the CLI token and work normally.
 
-## Release-please (`.github/workflows/publish.yml`)
+## Releases
 
-- Runs on every push to `main` using `googleapis/release-please-action` v5 with a bot app token.
-- Config: `release-please-config.json`; current version manifest: `.release-please-manifest.json`. Single package rooted at `.`, component `brepkit-wasm`; the version is also bumped in `crates/wasm/Cargo.toml`.
-- Flow: merging a `feat`/`fix`/`perf` PR creates or updates the pending release PR (`chore(main): release X.Y.Z`, head branch `release-please--branches--main--components--brepkit-wasm`). Merging that release PR creates the tag and GitHub release and publishes to npm.
-- Version-neutral changes: `docs` and `chore` commits are changelog-hidden; changes only under excluded paths (`.github`, `book`, `scripts`, `benches`, `bench-results`, `examples`, `bindings`) do not bump.
-- Manual escape hatch: `workflow_dispatch` on the Publish workflow with a `publish_version` input skips release-please.
-- Cross-repo: brepjs (`~/Git/brepjs`) consumes the published wasm package; see the release-flow skill for the two-repo runbook.
+There is no release automation in this fork. `crates/wasm/Cargo.toml` and
+`CHANGELOG.md` are bumped by hand, and the npm package `@faicad/brepkit2-wasm`
+is published manually via `cargo xtask wasm-publish` (add `--dry-run` first).
+`cargo xtask wasm-build --skip-opt` produces and validates the package locally
+without publishing.
 
 ## CI failures you did not cause
 
@@ -128,7 +127,7 @@ Bumping wasm-bindgen is its own change with its own PR. Never bump it as a drive
 | CI `boundaries` job fails | A crate dependency violates the layer rules | Run `./scripts/check-boundaries.sh` locally; see the layer-boundaries skill |
 | CI `taplo` or `machete` fails but pre-commit passed | Tool not installed locally; the hook skips it silently | `cargo install taplo-cli cargo-machete`, fix, re-commit |
 | Compliance grep hits in a file you touched | You introduced a banned reference-kernel name, or you touched a grandfathered file | Remove new occurrences; leave grandfathered ones as-is |
-| Release PR did not update after merge | Commit type was `docs`/`chore`, or all changes fell under excluded paths | Expected; only `feat`/`fix`/`perf` in versioned paths bump |
+| Release PR did not update after merge | Release automation no longer exists in this fork | Expected; bump `crates/wasm/Cargo.toml` and `CHANGELOG.md` by hand |
 | `deny` or `audit` fails on a PR that never touched deps | `Cargo.lock` is gitignored; CI resolved a newly-advisoried or newly-released dep | Follow the triage order in "CI failures you did not cause"; never blanket-ignore |
 | MSRV job fails with syntax or feature errors inside a dependency | A dep released a version requiring Rust newer than 1.88 | Constrain that dep in `Cargo.toml`; do not bump `rust-version` |
 | `cargo xtask wasm-build` bails with a wasm-bindgen-cli version mismatch | Local CLI differs from the pin; the crate pin and `xtask/src/wasm.rs` constant must match | Install the pinned CLI version; bump the pin only as its own PR |

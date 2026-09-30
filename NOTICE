@@ -1,0 +1,21 @@
+brepkit2
+Copyright 2026 The brepkit2 contributors
+
+This product is a fork of brepkit
+(https://github.com/andymai/brepkit), copyright 2026 Andy Mai.
+
+The fork was taken from upstream tag v2.129.15 (2026-08-07) and has been
+developed independently since. No affiliation with or endorsement by the
+upstream author is claimed or implied.
+
+Upstream brepkit is licensed under either of:
+
+  * Apache License, Version 2.0 (see LICENSE-APACHE)
+  * MIT License (see LICENSE-MIT)
+
+at your option. This fork is distributed under the same terms. The original
+copyright notices in LICENSE-MIT and LICENSE-APACHE are preserved unmodified,
+as the license requires; the notices above are cumulative, not replacements.
+
+Modifications relative to upstream v2.129.15 are tracked in this repository's
+git history and summarized in CHANGELOG.md.

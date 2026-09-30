@@ -35,7 +35,7 @@ The trailing `-- --bench "<filter>"` is criterion syntax: `--bench` switches the
 
 All five files in `crates/operations/benches/`, each `harness = false` in `crates/operations/Cargo.toml`.
 
-- `cad_operations.rs`: the head-to-head suite: `makeBox(10,20,30) x100`, `fuse(box,box) x10`, `cut(box,cyl) x10`, `intersect(box,sphere) x10`, `mesh box (tol=0.1)`, `mesh sphere (tol=0.01)`, `tessellate 64-hole plate`, `boolean 64 cuts (8x8 grid)`, `gridfinity 1x1 bin (box+shell+chamfer)`, and more. Native and JS numbers line up via the hand-maintained `NAME_MAP` table in `scripts/bench-report.ts` (rg: `NAME_MAP`), which pairs each criterion name with its counterpart in `brepjs/benchmarks/kernel-comparison.bench.test.ts`. The names do not match literally: criterion names carry an ` xN` repetition suffix (`fuse(box,box) x10`), the JS names do not (`fuse(box,box)`, `translate ×1000`). Any new head-to-head benchmark must be added to `NAME_MAP` or it will be silently missing from `bench-results/report.md`.
+- `cad_operations.rs`: the head-to-head suite: `makeBox(10,20,30) x100`, `fuse(box,box) x10`, `cut(box,cyl) x10`, `intersect(box,sphere) x10`, `mesh box (tol=0.1)`, `mesh sphere (tol=0.01)`, `tessellate 64-hole plate`, `boolean 64 cuts (8x8 grid)`, `gridfinity 1x1 bin (box+shell+chamfer)`, and more. Native and upstream-JS numbers were paired via the hand-maintained `NAME_MAP` table in `scripts/bench-report.ts` (rg: `NAME_MAP`), which mapped each criterion name to its JS counterpart. The names do not match literally: criterion names carry an ` xN` repetition suffix (`fuse(box,box) x10`), the JS names did not (`fuse(box,box)`, `translate ×1000`). If you restore a JS harness, add every new head-to-head benchmark to `NAME_MAP` or it will be silently missing from `bench-results/report.md`.
 - `boolean_perf.rs`: scaling behavior. Group `sequential_cylinder_cuts` with IDs `N=4`, `N=16`, `N=64`; group `single_boolean_at_face_count` for cost vs target complexity. This is where O(N²) regressions show first.
 - `boolean_tracking.rs`: the small fast suite CI runs for trend tracking (group `boolean`; IDs include `cut_cylinder_through_box`, `perforated_cut_36`). Keep it under a minute; it runs on every push to main.
 - `compound_cut_perf.rs`: `compound_cut` vs sequential `boolean(Cut)`. Groups `compound_cut_cylinders` (grids of 4/16/36/64) and `compound_cut_honeycomb` (hex grids, IDs like `compound_rings=2_N=19`).
@@ -76,11 +76,13 @@ The `change:` line appears once `target/criterion/` holds a prior run. That dire
 
 ### Cross-kernel comparison
 
-```bash
-./scripts/bench-compare.sh ~/Git/brepjs
-```
-
-Pipeline: (1) full native criterion run, log to `bench-results/criterion.log`; (2) `wasm-pack build crates/wasm --target nodejs --release`; (3) install the built package into brepjs with `--no-save`; (4) run `benchmarks/kernel-comparison.bench.test.ts` under vitest with `BENCH_OUTPUT_JSON=1`; (5) `npx tsx scripts/bench-report.ts` produces `bench-results/report.md` and `comparison.json`. That report is the only valid evidence for "faster than the reference kernel" claims. See the parity-benchmarking skill for interpreting it and for a lighter one-off head-to-head (wasm-pack build plus a vitest `resolve.alias` swap in brepjs, which avoids the npm install step).
+Not available in this fork. Upstream drove the head-to-head through
+`scripts/bench-compare.sh` plus a JS harness that lived in a separate
+repository; both were removed with the fork split. `scripts/bench-report.ts`
+survives and still renders a report from a `comparison.json` you supply, so you
+can reuse the report format if you build your own harness — but there is no
+supported way to produce that input here. In-fork performance evidence is
+`cargo bench-fast` / `cargo bench-full` plus the `boolean_tracking` CI trend.
 
 ## Bug classes in depth
 
@@ -145,4 +147,4 @@ Lesson: a perf cliff can hide entirely inside error-handling plumbing. The flame
 - **Deflection**: max chord deviation for tessellation, the third argument to `tessellate_solid`. Smaller means superlinearly more triangles on curved faces.
 - **Arena / Topology**: the arena allocator owning all B-Rep entities (`crates/topology`). Booleans against a growing accumulator solid slow down as its face count grows.
 - **Criterion baseline**: history in `target/criterion/` that makes re-runs print change-%; the before/after mechanism.
-- **The reference kernel**: the incumbent C++ CAD kernel brepkit replaces. The perf bar is beating it, measured through `bench-compare.sh`.
+- **The reference kernel**: the incumbent C++ CAD kernel brepkit is measured against. The perf bar is beating it; the harness for that measurement is not in this fork (see "Cross-kernel comparison").

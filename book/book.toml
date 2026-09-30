@@ -1,13 +1,13 @@
 [book]
-authors = ["brepkit contributors"]
+authors = ["brepkit2 contributors"]
 description = "A modern, pure-Rust B-Rep CAD kernel"
 language = "en"
 src = "src"
-title = "brepkit"
+title = "brepkit2"
 
 [build]
 build-dir = "book"
 
 [output.html]
-edit-url-template = "https://github.com/andymai/brepkit/edit/main/book/{path}"
-git-repository-url = "https://github.com/andymai/brepkit"
+edit-url-template = "https://github.com/Faicad/brepkit2/edit/main/book/{path}"
+git-repository-url = "https://github.com/Faicad/brepkit2"

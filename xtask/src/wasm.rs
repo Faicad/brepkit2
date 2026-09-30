@@ -7,6 +7,12 @@ use std::process::Command;
 /// the workspace Cargo.toml.
 const WASM_BINDGEN_VERSION: &str = "0.2.121";
 
+/// Published npm package name. Distinct from the `brepkit-wasm` crate name:
+/// the crate name drives the `brepkit_wasm.*` artifact filenames, while this
+/// is what consumers install. The unscoped upstream name is taken on npm, so
+/// this fork publishes under its own scope.
+const NPM_PKG_NAME: &str = "@faicad/brepkit2-wasm";
+
 /// Minimum number of exported methods expected in the .d.ts file.
 /// Based on ~185 methods in the current BrepKernel. Update when the API surface
 /// changes significantly.
@@ -233,7 +239,7 @@ fn patch_package_json(pkg_json: &mut serde_json::Value) -> Result<()> {
         .as_object_mut()
         .context("package.json is not an object")?;
 
-    obj.insert("name".into(), serde_json::json!("brepkit-wasm"));
+    obj.insert("name".into(), serde_json::json!(NPM_PKG_NAME));
     obj.insert("main".into(), serde_json::json!("brepkit_wasm_node.cjs"));
     obj.insert("module".into(), serde_json::json!("brepkit_wasm.js"));
 
@@ -375,8 +381,10 @@ fn validate_package_json(pkg_json: &serde_json::Value, errors: &mut Vec<String>)
     let get_str = |key: &str| pkg_json.get(key).and_then(|v| v.as_str()).unwrap_or("");
 
     let name = get_str("name");
-    if name != "brepkit-wasm" {
-        errors.push(format!("package.json name is '{name}', expected 'brepkit-wasm'"));
+    if name != NPM_PKG_NAME {
+        errors.push(format!(
+            "package.json name is '{name}', expected '{NPM_PKG_NAME}'"
+        ));
     } else {
         println!("  ok name: {name}");
     }
@@ -455,7 +463,7 @@ pub fn publish(dry_run: bool) -> Result<()> {
         bail!("Version mismatch: package.json={pkg_version}, tag={tag_version}");
     }
 
-    println!("\nPublishing brepkit-wasm@{pkg_version}...");
+    println!("\nPublishing {NPM_PKG_NAME}@{pkg_version}...");
 
     let mut cmd = Command::new("npm");
     cmd.args(["publish", "--provenance", "--access", "public"]);
@@ -469,7 +477,7 @@ pub fn publish(dry_run: bool) -> Result<()> {
     if dry_run {
         println!("  Dry run complete (nothing published)");
     } else {
-        println!("  Published brepkit-wasm@{pkg_version}");
+        println!("  Published {NPM_PKG_NAME}@{pkg_version}");
     }
 
     Ok(())
@@ -501,7 +509,7 @@ mod tests {
 
         patch_package_json(&mut pkg).unwrap();
 
-        assert_eq!(pkg["name"], "brepkit-wasm");
+        assert_eq!(pkg["name"], "@faicad/brepkit2-wasm");
         assert_eq!(pkg["main"], "brepkit_wasm_node.cjs");
         assert_eq!(pkg["module"], "brepkit_wasm.js");
         assert_eq!(pkg["exports"]["."]["node"], "./brepkit_wasm_node.cjs");
@@ -555,7 +563,7 @@ mod tests {
     #[test]
     fn validate_detects_missing_exports() {
         let pkg = json!({
-            "name": "brepkit-wasm",
+            "name": "@faicad/brepkit2-wasm",
             "main": "brepkit_wasm_node.cjs",
             "files": ["brepkit_wasm_node.cjs"]
         });
@@ -621,7 +629,7 @@ export class BrepKernel {
 
         // Create mock package.json (as wasm-pack would generate)
         let initial = json!({
-            "name": "brepkit-wasm",
+            "name": "@faicad/brepkit2-wasm",
             "version": "0.5.3",
             "files": ["brepkit_wasm_bg.wasm", "brepkit_wasm.js", "brepkit_wasm.d.ts"],
             "module": "brepkit_wasm.js"
@@ -648,7 +656,7 @@ export class BrepKernel {
         // package.json was patched
         let result: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(pkg.join("package.json")).unwrap()).unwrap();
-        assert_eq!(result["name"], "brepkit-wasm");
+        assert_eq!(result["name"], "@faicad/brepkit2-wasm");
         assert_eq!(result["main"], "brepkit_wasm_node.cjs");
         assert_eq!(result["exports"]["."]["node"], "./brepkit_wasm_node.cjs");
     }

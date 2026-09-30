@@ -1,11 +1,11 @@
 # Architecture
 
-brepkit is the computational engine behind brepjs. While brepjs provides the
-TypeScript API that developers interact with, brepkit handles the underlying
-B-Rep modeling: geometry evaluation, boolean operations, tessellation, and
-data exchange.
+brepkit2 is a B-Rep modeling kernel. It handles the underlying B-Rep modeling —
+geometry evaluation, boolean operations, tessellation, and data exchange — and
+exposes it to Rust callers directly and to JavaScript through the
+`brepkit-wasm` crate (published to npm as `@faicad/brepkit2-wasm`).
 
-brepkit uses a strict layered architecture. Each layer may only depend on
+brepkit2 uses a strict layered architecture. Each layer may only depend on
 layers below it, never above or sideways.
 
 ```

@@ -70,4 +70,4 @@ Small wasm size is a headline competitive property of this kernel (several times
 
 ## Related skills
 
-`add-operation` (the L3 operation a binding usually wraps), `testing` (workspace test conventions), `release-flow` (publishing the package), `parity-benchmarking` (running the brepjs bench harness against a local build), `layer-boundaries` (what `wasm/src` may import).
+`add-operation` (the L3 operation a binding usually wraps), `testing` (workspace test conventions), `layer-boundaries` (what `wasm/src` may import).

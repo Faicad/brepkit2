@@ -1,5 +1,5 @@
 {
-  "name": "@brepkit/wasm",
+  "name": "@faicad/brepkit2-wasm",
   "version": "0.1.0",
   "description": "TypeScript bindings for the brepkit modeling engine",
   "type": "module",
