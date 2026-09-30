@@ -1,0 +1,7 @@
+# OSV-Scanner config. deny.toml's ignore list is cargo-deny-only and is not
+# read by osv-scanner, so advisories must be allowlisted here as well.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+# Re-check and drop when sctk-adwaita moves from ab_glyph/ttf-parser to skrifa.
+reason = "ttf-parser is unmaintained (informational, no fixed version); only reachable via winit -> sctk-adwaita -> ab_glyph behind brepkit-render's window feature to rasterize viewer UI fonts, never on untrusted input"
