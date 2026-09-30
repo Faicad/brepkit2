@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790768462759,
+  "lastUpdate": 1790768595312,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -269,6 +269,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 26126893,
             "range": "± 757624",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com",
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "yuan",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "9dd6a50d1f50059958c9122eed581199684fbcf6",
+          "message": "chore(deps): update wasm-bindgen requirement from =0.2.126 to =0.2.128\n\nUpdates the requirements on [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) to permit the latest version.\n- [Release notes](https://github.com/wasm-bindgen/wasm-bindgen/releases)\n- [Changelog](https://github.com/wasm-bindgen/wasm-bindgen/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/wasm-bindgen/wasm-bindgen/compare/0.2.126...0.2.128)\n\n---\nupdated-dependencies:\n- dependency-name: wasm-bindgen\n  dependency-version: 0.2.128\n  dependency-type: direct:production\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>",
+          "timestamp": "2026-09-30T19:38:53+08:00",
+          "tree_id": "802883d51f9bac1d209db0d93ef81c685cb6f427",
+          "url": "https://github.com/Faicad/brepkit2/commit/9dd6a50d1f50059958c9122eed581199684fbcf6"
+        },
+        "date": 1790768594364,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 528931,
+            "range": "± 12081",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 572617,
+            "range": "± 11786",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 6890,
+            "range": "± 106",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 385068,
+            "range": "± 9585",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 14809057,
+            "range": "± 809720",
             "unit": "ns/iter"
           }
         ]
