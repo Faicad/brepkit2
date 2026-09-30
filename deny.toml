@@ -13,6 +13,11 @@ yanked = "warn"
 ignore = [
   {id = "RUSTSEC-2026-0194", reason = "only reachable via wayland-scanner build-time codegen on trusted protocol XML; the untrusted-input 3MF path is patched to quick-xml >= 0.41"},
   {id = "RUSTSEC-2026-0195", reason = "only reachable via wayland-scanner build-time codegen on trusted protocol XML; the untrusted-input 3MF path is patched to quick-xml >= 0.41"},
+  # ttf-parser is unmaintained (informational, no fix available). Enters only
+  # via winit -> sctk-adwaita -> ab_glyph, behind brepkit-render's `window`
+  # feature, to rasterize UI fonts in the interactive viewer. It never parses
+  # untrusted input. Re-check and drop when sctk-adwaita moves to skrifa.
+  {id = "RUSTSEC-2026-0192", reason = "unmaintained-crate advisory, no fixed version; only reachable via winit's sctk-adwaita font rasterizer behind the render `window` feature, never on untrusted input"},
 ]
 
 [licenses]
