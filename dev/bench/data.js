@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790768595312,
+  "lastUpdate": 1790769907243,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -323,6 +323,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 14809057,
             "range": "± 809720",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "df21b152838d51034f08a89ff1b888da3d40f5f2",
+          "message": "fix(ci): commit Cargo.lock and clear stale criterion cache for bench\n\n- OSV Scan failed because Cargo.lock was gitignored, so the scanner\n  could not find the lockfile on the runner. Commit it (also unblocks\n  reproducible builds and the Security Audit job).\n- Benchmark publish failed because rust-cache restored a partial\n  target/criterion baseline, making criterion emit ERROR lines into\n  the bencher output. Wipe target/criterion before running benches.",
+          "timestamp": "2026-09-30T20:01:59+08:00",
+          "tree_id": "91fab4875676fc7faf2741da4b0eb9bd470208f2",
+          "url": "https://github.com/Faicad/brepkit2/commit/df21b152838d51034f08a89ff1b888da3d40f5f2"
+        },
+        "date": 1790769906340,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 988508,
+            "range": "± 5019",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1076484,
+            "range": "± 2725",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 12981,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 708748,
+            "range": "± 5389",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 26464786,
+            "range": "± 122350",
             "unit": "ns/iter"
           }
         ]
