@@ -1,6 +1,6 @@
 # Integration Tests
 
-End-to-end tests that exercise multiple brepkit subsystems together.
+End-to-end tests that exercise multiple brepkit2 subsystems together.
 These tests verify that primitives, operations, and I/O work correctly
 when combined in realistic workflows.
 

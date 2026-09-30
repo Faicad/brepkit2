@@ -5,7 +5,7 @@ They catch regressions in tessellation, serialization, and geometry computation.
 
 ## How it works
 
-1. Create a shape using brepkit operations
+1. Create a shape using brepkit2 operations
 2. Produce output (mesh vertices, STEP text, measurements)
 3. Compare against a `.golden` file in `tests/golden/data/`
 4. If the output differs, the test fails with a diff

@@ -1,6 +1,6 @@
 <div align="center">
 
-# brepkit
+# brepkit2
 
 Solid modeling kernel for Rust and WebAssembly.
 
@@ -63,7 +63,7 @@ const step = kernel.exportStep(notched); // Uint8Array
 
 ## Why a CAD kernel?
 
-brepkit is a B-Rep solid modeling kernel written from scratch in Rust. It targets WebAssembly, so the same kernel runs in the browser and on the desktop. `unsafe` is denied by lint, as are `unwrap` and `panic`. Every public operation returns a `Result`.
+brepkit2 is a B-Rep solid modeling kernel written from scratch in Rust. It targets WebAssembly, so the same kernel runs in the browser and on the desktop. `unsafe` is denied by lint, as are `unwrap` and `panic`. Every public operation returns a `Result`.
 
 It grew out of building [gridfinitylayouttool.com](https://gridfinitylayouttool.com), where the options for parametric CAD in the browser were proprietary or compiled from large C++ codebases.
 
@@ -71,7 +71,7 @@ The geometry is exact. Booleans run on analytic and NURBS surfaces and keep thos
 
 ## Status
 
-brepkit is in active development. Core modeling is solid. Each feature below is marked stable, beta, planned, or experimental, and [Known Limitations](#known-limitations) covers the gaps.
+brepkit2 is in active development. Core modeling is solid. Each feature below is marked stable, beta, planned, or experimental, and [Known Limitations](#known-limitations) covers the gaps.
 
 | Category                | Feature                                                                      | Status       |
 | ----------------------- | ---------------------------------------------------------------------------- | ------------ |
@@ -122,12 +122,12 @@ A few areas are still maturing. Worth knowing before you build on them:
 
 ## Scope
 
-brepkit deliberately does not:
+brepkit2 deliberately does not:
 
 - **Bundle a viewport into the kernel.** The core emits exact geometry and tessellated meshes; camera, lighting, and shading belong to the caller (Three.js and the like). The optional `brepkit-render` crate provides offscreen wgpu rendering with a face-id buffer, for tests and headless verification, and is not required by any core operation.
 - **Plan toolpaths or slice.** Export STEP, STL, or 3MF and pass the output to a CAM tool or slicer.
 - **Model with meshes.** The kernel operates on exact B-Rep geometry. Subdivision surfaces, polygon meshes, and voxels are out of scope.
-- **Provide a GUI.** brepkit is a library. Building a UI around it, like [gridfinitylayouttool.com](https://gridfinitylayouttool.com), is the application's job.
+- **Provide a GUI.** brepkit2 is a library. Building a UI around it, like [gridfinitylayouttool.com](https://gridfinitylayouttool.com), is the application's job.
 - **Simulate physics.** Measurement (volume, area, center of mass) is included. Stress analysis, collision detection, and dynamics are not.
 
 ## Architecture
@@ -154,7 +154,7 @@ Layered Cargo workspace. Each crate depends only on the same or lower layers, an
 
 Median times inherited from the upstream benchmark suite (5 iterations, Node.js, Linux x86_64). WASM is single-threaded. Native benchmarks use criterion.
 
-| Operation                | brepkit (WASM) | OCCT (WASM) | Speedup | brepkit (native) |
+| Operation                | brepkit2 (WASM) | OCCT (WASM) | Speedup | brepkit2 (native) |
 | ------------------------ | -------------- | ----------- | ------- | ---------------- |
 | fuse(box, box) (×10)     | 0.5 ms         | 43.7 ms     | 87x     | 122 µs           |
 | cut(box, cylinder) (×10) | 28.3 ms        | 64.3 ms     | 2.3x    | 9.3 ms           |
@@ -164,7 +164,7 @@ Median times inherited from the upstream benchmark suite (5 iterations, Node.js,
 | mesh sphere (tol=0.01)   | 7.1 ms         | 51.9 ms     | 7.3x    | 6.0 ms           |
 | exportSTEP (×10)         | 0.9 ms         | 14.3 ms     | 16x     | n/a              |
 
-Every quoted row is output-verified across both kernels before timing is compared: fuse, chamfer, and sphere volumes match exactly; cut, fillet, and multi-boolean volumes agree within 0.004%. The sphere mesh densities are comparable at equal tolerance (9,800 triangles vs 10,176). The `intersect(box, sphere)` row is excluded: brepkit currently keeps the wrong sphere region for that configuration (an open, pinned defect), so its ~200x timing would not be a like-for-like comparison.
+Every quoted row is output-verified across both kernels before timing is compared: fuse, chamfer, and sphere volumes match exactly; cut, fillet, and multi-boolean volumes agree within 0.004%. The sphere mesh densities are comparable at equal tolerance (9,800 triangles vs 10,176). The `intersect(box, sphere)` row is excluded: brepkit2 currently keeps the wrong sphere region for that configuration (an open, pinned defect), so its ~200x timing would not be a like-for-like comparison.
 
 Booleans preserve analytic surfaces, so face counts stay low across chained operations. A nine-step compound boolean settles at 72 faces while a mesh-based approach would reach roughly 7,000. The same holds for blends: a straight edge filleted between two planar faces keeps an exact cylindrical wall rather than a NURBS approximation of one.
 
@@ -248,7 +248,7 @@ Broad directions, no dates.
 - **Lossless IGES.** Real B-Rep import and analytic-surface export.
 - **Documentation.** API reference, tutorials, and architectural guides.
 
-## Projects Using brepkit
+## Projects Using brepkit2
 
 [Open a PR](https://github.com/Faicad/brepkit2/pulls) to add your project.
 

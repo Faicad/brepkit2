@@ -1,13 +1,13 @@
 ---
 name: profiling
-description: Use when investigating or fixing performance in brepkit: a benchmark got slower, an operation (boolean, fuse, tessellation) is unexpectedly slow or hangs, a criterion bench times out or shows wild variance, or a PR needs before/after perf numbers. Covers flamegraphs, the criterion bench suite, cross-kernel comparison, and the perf bug classes this codebase has actually had.
+description: Use when investigating or fixing performance in brepkit2: a benchmark got slower, an operation (boolean, fuse, tessellation) is unexpectedly slow or hangs, a criterion bench times out or shows wild variance, or a PR needs before/after perf numbers. Covers flamegraphs, the criterion bench suite, cross-kernel comparison, and the perf bug classes this codebase has actually had.
 ---
 
 # Profiling and Performance Debugging
 
 ## The bar
 
-brepkit must beat the reference kernel on performance, not merely pass tests. Perf regressions are release blockers. CI runs `boolean_tracking` on a shared runner and only comments on regressions over 200% (`.github/workflows/benchmark.yml`, `fail-on-alert: false`), so the automated gate is looser than the real bar. You are the gate: any PR touching a hot path pastes before/after criterion numbers in its body. The cross-kernel harness that upstream used is not part of this fork, so cross-kernel numbers are not reproducible here; do not quote upstream's figures as this fork's results.
+brepkit2 must beat the reference kernel on performance, not merely pass tests. Perf regressions are release blockers. CI runs `boolean_tracking` on a shared runner and only comments on regressions over 200% (`.github/workflows/benchmark.yml`, `fail-on-alert: false`), so the automated gate is looser than the real bar. You are the gate: any PR touching a hot path pastes before/after criterion numbers in its body. The cross-kernel harness that upstream used is not part of this fork, so cross-kernel numbers are not reproducible here; do not quote upstream's figures as this fork's results.
 
 ## Quick reference
 

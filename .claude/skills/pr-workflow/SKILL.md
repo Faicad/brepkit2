@@ -1,6 +1,6 @@
 ---
 name: pr-workflow
-description: Use when committing, pushing, opening, reviewing, or merging a pull request in brepkit, or when a git hook fails, a push hangs, commitlint flags a message, a PR sits waiting on AI review, or parallel work needs a worktree. Covers hooks, conventional commits, the AI-review merge gate, and the sandbox HTTPS push.
+description: Use when committing, pushing, opening, reviewing, or merging a pull request in brepkit2, or when a git hook fails, a push hangs, commitlint flags a message, a PR sits waiting on AI review, or parallel work needs a worktree. Covers hooks, conventional commits, the AI-review merge gate, and the sandbox HTTPS push.
 ---
 
 # PR Workflow

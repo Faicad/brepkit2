@@ -38,7 +38,7 @@ at full parity, across all its generator scenarios: 100% triangle correctness, v
 correctness, manifold correctness, AND generation performance at least as good. Parity
 first, then beating it, is the acceptance bar. The harness that measured this is upstream-only and is not part of this fork.
 
-Head-to-head (wasm vs wasm, 2026-08-06, current kernel hash-verified overlaid into the bench harness — NOTE: the harness's vitest resolve.alias does NOT reach the CJS require path, so overlay node_modules and hash-verify; an alias-only run silently benches the installed kernel): brepkit leads every row — fuse(box,box) 87x, cut(box,cyl) 2.3x, chamfer 27x, fillet 21x, multi-boolean 6.4x, mesh box 5x, mesh sphere 7.3x (was 1.4x; the display-sphere curvature-floor removal, #1389 — sphere density now matches the reference at equal tolerance, 9,800 vs 10,176 tris), transforms ~4x, volume 47x (re-measured 2026-08-07 on released 2.129.13, hash-verified overlay in a brepjs bench worktree: 0.176 ms vs 8.31 ms per 100 calls — the exact all-planar divergence path #1396; was 2.3x), bbox 3x, STEP export 16x. Equivalence verified per row (volume oracle both kernels): fuse/chamfer/sphere exact, cut/fillet/multi-boolean within 0.004%; the intersect row stays DISQUALIFIED (wrong region, pinned below). Native criterion CAVEAT: the cad_operations "mesh sphere" case tessellates PER-FACE through a bench-local shim (boundary-locked, ~40x lighter than the solid-level path the wasm row exercises) — never compare it against solid-level numbers; perf_probe measures the matching-parameter native figure. Where parity stands: gridfinity bin parity reached; all four primitive-boolean
+Head-to-head (wasm vs wasm, 2026-08-06, current kernel hash-verified overlaid into the bench harness — NOTE: the harness's vitest resolve.alias does NOT reach the CJS require path, so overlay node_modules and hash-verify; an alias-only run silently benches the installed kernel): brepkit2 leads every row — fuse(box,box) 87x, cut(box,cyl) 2.3x, chamfer 27x, fillet 21x, multi-boolean 6.4x, mesh box 5x, mesh sphere 7.3x (was 1.4x; the display-sphere curvature-floor removal, #1389 — sphere density now matches the reference at equal tolerance, 9,800 vs 10,176 tris), transforms ~4x, volume 47x (re-measured 2026-08-07 on released 2.129.13, hash-verified overlay in a brepjs bench worktree: 0.176 ms vs 8.31 ms per 100 calls — the exact all-planar divergence path #1396; was 2.3x), bbox 3x, STEP export 16x. Equivalence verified per row (volume oracle both kernels): fuse/chamfer/sphere exact, cut/fillet/multi-boolean within 0.004%; the intersect row stays DISQUALIFIED (wrong region, pinned below). Native criterion CAVEAT: the cad_operations "mesh sphere" case tessellates PER-FACE through a bench-local shim (boundary-locked, ~40x lighter than the solid-level path the wasm row exercises) — never compare it against solid-level numbers; perf_probe measures the matching-parameter native figure. Where parity stands: gridfinity bin parity reached; all four primitive-boolean
 mesh-fallbacks are exact analytic and beat the reference kernel 2.9-9.5x head to head;
 revolve is exact-analytic; the GPU render crate shipped through screen-space LOD. Per-PR
 history lives in git — do not re-record it here.
@@ -773,7 +773,7 @@ Measured A/B, same day, same tool commit, each overlay md5-verified through brep
   the borrow flag forever (recovery = new `BrepKernel`). Panic text now survives via
   `crates/wasm/src/panics.rs`
 - **Divider + floor pattern families** — 18 of 21 failures were ONE missing brepjs adapter method
-  (`applyMatrix` had no compound case); 21 → 4 after the fix. Not a brepkit defect
+  (`applyMatrix` had no compound case); 21 → 4 after the fix. Not a brepkit2 defect
 
 ## Refuted: do not re-try
 
@@ -788,7 +788,7 @@ Measured A/B, same day, same tool commit, each overlay md5-verified through brep
   all straight axis-aligned wall runs stored as NurbsCurve; a span-local sagitta gate fixes it.
 - **`shell_is_outward_oriented` / `signed_volume_of_shell` being inverted** — both are exact on a
   known-good cube (`flux_orientation_probe.rs`); the operand really was inward.
-- **The goma odd bands as a GFA defect** — they were brepkit's own mesh-fallback output, i.e. GIGO.
+- **The goma odd bands as a GFA defect** — they were brepkit2's own mesh-fallback output, i.e. GIGO.
 - **Ellipse aliasing at FF filter 2 on the goma lump** — the 49 dropped ellipses miss by 0.108 mm at
   0.055 mm sampling, a genuine 2× separation.
 - Also refuted, each once: coincident coaxial cylinders as the corner-cut root; a classification
@@ -852,7 +852,7 @@ Measured A/B, same day, same tool commit, each overlay md5-verified through brep
   `fuseWithEvolution`/`cutWithEvolution`. Replay with `crates/io/examples/replay_pair.rs`
   (`A=`, `B=`, `OP=`) or `replay_cut_capture.rs` for base+tools chains.
 - **A multi-case tool probe MUST make a fresh kernel per case, or run one case per process.** The
-  brepkit kernel is a per-worker singleton whose borrow flag strands permanently on a trap
+  brepkit2 kernel is a per-worker singleton whose borrow flag strands permanently on a trap
   ("recursive use of an object"), so the first failing case poisons every later one — a sweep then
   reports one real number followed by N identical bogus errors. `exportIntegrityRunner` recreates
   the kernel for exactly this reason; a hand-rolled probe does not. Cheapest fix is a `CASE=` env

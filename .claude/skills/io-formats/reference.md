@@ -144,6 +144,10 @@ Priority order when capturing a fixture from a real failing case:
 
 Header envelope: `ISO-10303-21;` / `HEADER;` /
 `FILE_DESCRIPTION(('brepkit STEP export'), '2;1');` / `FILE_NAME(..)` /
+// The `brepkit STEP export` string above is emitted verbatim by
+// `crates/io/src/step/writer.rs` and appears in all 16 `crates/io/tests/data/*.step`
+// fixtures. It is deliberately NOT rebranded to brepkit2: renaming the writer would
+// desynchronize new exports from the fixtures. Change both together, or neither.
 `FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));` / `DATA;` .. `ENDSEC;` / `END-ISO-10303-21;`.
 Units: length `SI_UNIT(.MILLI.,.METRE.)`, angle `SI_UNIT($,.RADIAN.)`, plus a solid-angle
 unit. Product structure via `ADVANCED_BREP_SHAPE_REPRESENTATION` +

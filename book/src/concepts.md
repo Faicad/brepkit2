@@ -14,7 +14,7 @@ because it preserves exact geometry and supports precise operations.
 
 ## Topology vs Geometry
 
-brepkit separates **topology** (how things are connected) from
+brepkit2 separates **topology** (how things are connected) from
 **geometry** (where things are in space):
 
 - **Topology**: Vertex → Edge → Wire → Face → Shell → Solid
@@ -27,7 +27,7 @@ robust boolean operations.
 
 ## Tolerance Model
 
-Floating-point arithmetic introduces rounding errors. brepkit uses a
+Floating-point arithmetic introduces rounding errors. brepkit2 uses a
 tolerance model to handle this:
 
 - **Linear tolerance**: distance below which two points are "the same"
@@ -40,7 +40,7 @@ Tolerances can be configured globally or per-operation.
 ## NURBS
 
 Non-Uniform Rational B-Splines (NURBS) are the mathematical foundation
-for curves and surfaces in brepkit. A NURBS curve is defined by:
+for curves and surfaces in brepkit2. A NURBS curve is defined by:
 
 - **Degree**: polynomial degree (typically 1–5)
 - **Control points**: points that influence the curve shape
