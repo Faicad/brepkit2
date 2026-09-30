@@ -33,7 +33,7 @@ smallvec = "1"
 # WASM
 serde-wasm-bindgen = "0.6"
 tsify = {version = "0.5", features = ["js"]}
-wasm-bindgen = "=0.2.126"                    # Pinned: must match wasm-bindgen-cli in CI
+wasm-bindgen = "=0.2.126"                    # Single source of truth for the wasm-bindgen-cli version; read by xtask (see required_wasm_bindgen_version)
 
 # Testing
 proptest = "1"

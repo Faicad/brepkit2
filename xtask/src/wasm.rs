@@ -3,10 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Pinned wasm-bindgen-cli version. Must match `wasm-bindgen = "=0.2.121"` in
-/// the workspace Cargo.toml.
-const WASM_BINDGEN_VERSION: &str = "0.2.121";
-
 /// Published npm package name. Distinct from the `brepkit-wasm` crate name:
 /// the crate name drives the `brepkit_wasm.*` artifact filenames, while this
 /// is what consumers install. The unscoped upstream name is taken on npm, so
@@ -59,11 +55,66 @@ fn run_cmd_output(cmd: &mut Command) -> Result<String> {
 }
 
 fn command_exists(name: &str) -> bool {
-    // Use `which` — standard on Linux/macOS where WASM builds run.
-    Command::new("which")
-        .arg(name)
-        .output()
-        .is_ok_and(|o| o.status.success())
+    // Scan PATH directly instead of shelling out to `which`, which does not
+    // exist in a native Windows shell (only under Git Bash / MSYS).
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    // Windows resolves a bare command name against PATHEXT (.COM, .EXE, ...).
+    // On unix PATHEXT is normally unset and this list stays empty.
+    let extensions: Vec<String> = std::env::var_os("PATHEXT")
+        .unwrap_or_default()
+        .to_string_lossy()
+        .split(';')
+        .filter(|ext| ext.len() > 1 && ext.starts_with('.'))
+        .map(str::to_string)
+        .collect();
+
+    std::env::split_paths(&path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .any(|dir| {
+            is_executable_file(&dir.join(name))
+                || extensions
+                    .iter()
+                    .any(|ext| is_executable_file(&dir.join(format!("{name}{ext}"))))
+        })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+/// The `wasm-bindgen` version pinned in the workspace `Cargo.toml`.
+///
+/// wasm-bindgen-cli must match the `wasm-bindgen` crate version exactly or it
+/// rejects the generated bindings, so the pin in `Cargo.toml` is the single
+/// source of truth. It used to be duplicated as a constant here, which drifted
+/// out of sync and broke local `wasm-build` runs.
+fn required_wasm_bindgen_version() -> Result<String> {
+    let manifest = fs::read_to_string(project_root()?.join("Cargo.toml"))
+        .context("failed to read the workspace Cargo.toml")?;
+
+    manifest
+        .lines()
+        .filter_map(|line| {
+            // Strip a trailing comment, then match `wasm-bindgen = "=X.Y.Z"`.
+            // Sibling keys such as `wasm-bindgen-futures` fail the `=` check.
+            let value = line.split('#').next()?.trim();
+            let value = value.strip_prefix("wasm-bindgen")?.trim_start();
+            let value = value.strip_prefix('=')?.trim();
+            let version = value.trim_matches('"').trim_start_matches('=');
+            (!version.is_empty()).then(|| version.to_string())
+        })
+        .next()
+        .context("no `wasm-bindgen = \"=X.Y.Z\"` pin found in the workspace Cargo.toml")
 }
 
 // ---------------------------------------------------------------------------
@@ -84,19 +135,18 @@ pub fn check_tools() -> Result<()> {
 
     // wasm-bindgen-cli version check
     if command_exists("wasm-bindgen") {
-        let version = run_cmd_output(
-            Command::new("wasm-bindgen").arg("--version"),
-        )?;
-        // Output is like "wasm-bindgen 0.2.121"
+        let required = required_wasm_bindgen_version()?;
+        let version = run_cmd_output(Command::new("wasm-bindgen").arg("--version"))?;
+        // Output is like "wasm-bindgen 0.2.126"
         let installed = version.split_whitespace().last().unwrap_or("");
-        if installed != WASM_BINDGEN_VERSION {
+        if installed != required {
             bail!(
                 "wasm-bindgen-cli version mismatch: installed={installed}, \
-                 required={WASM_BINDGEN_VERSION}\n  \
-                 Fix: cargo binstall wasm-bindgen-cli@{WASM_BINDGEN_VERSION} --no-confirm"
+                 required={required}\n  \
+                 Fix: cargo binstall wasm-bindgen-cli@{required} --no-confirm"
             );
         }
-        println!("  wasm-bindgen-cli {WASM_BINDGEN_VERSION} ok");
+        println!("  wasm-bindgen-cli {required} ok");
     } else {
         println!(
             "  warning: wasm-bindgen-cli not found (wasm-pack bundles its own, \
@@ -493,6 +543,41 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    // -- tool discovery tests ----------------------------------------------
+
+    #[test]
+    fn command_exists_finds_cargo_on_path() {
+        // cargo is always on PATH when these tests are running.
+        assert!(command_exists("cargo"));
+    }
+
+    #[test]
+    fn command_exists_rejects_absent_command() {
+        assert!(!command_exists("brepkit2-no-such-tool-exists"));
+    }
+
+    // -- wasm-bindgen version pin tests -------------------------------------
+
+    #[test]
+    fn required_version_matches_workspace_pin() {
+        let version = required_wasm_bindgen_version().unwrap();
+        assert_eq!(
+            version, "0.2.126",
+            "workspace Cargo.toml pin changed; update this test"
+        );
+    }
+
+    #[test]
+    fn required_version_is_a_plain_semver() {
+        // Guards against the parser keeping the `=` or quotes from "=0.2.126".
+        let version = required_wasm_bindgen_version().unwrap();
+        assert!(!version.starts_with('='), "leading `=` leaked: {version}");
+        assert!(
+            version.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "not a plain version: {version}"
+        );
+    }
 
     // -- patch_package_json tests -----------------------------------------
 
