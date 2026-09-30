@@ -1,0 +1,17 @@
+{
+  "excluded": [
+    ".agents/notes/AGENTS.md",
+    ".agents/notes/implemented/AGENTS.md",
+    ".agents/notes/archived/AGENTS.md",
+    "docs/AGENTS.md",
+    "docs/i18n/style-samples.md",
+    "docs/i18n/terminology.md",
+    "docs/i18n/translation-prompt.md",
+    "docs/plans/",
+    "docs/analysis/",
+    "docs/handover/",
+    "packages/core/src/vendored/",
+    "packages/core/src/brepkit-kernel/_test-kernels/",
+    "packages/brepjs/src/"
+  ]
+}

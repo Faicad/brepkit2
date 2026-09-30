@@ -1,13 +1,8 @@
 # brepkit2 — Project Guidelines
 
-brepkit2 is a B-Rep modeling kernel: geometry, booleans, tessellation, and I/O,
-written in Rust and exposed to JavaScript through `brepkit-wasm`.
+brepkit2 is a B-Rep modeling kernel: geometry, booleans, tessellation, and I/O, written in Rust and exposed to JavaScript through `brepkit-wasm`.
 
-This repository is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream
-tag `v2.129.15`). Crate names are unchanged from upstream on purpose — they are
-unpublished, so there is no registry conflict, and renaming them would touch
-every file in the workspace. The npm package is published separately as
-`@faicad/brepkit2-wasm` (see `xtask/src/wasm.rs::NPM_PKG_NAME`).
+This repository is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream tag `v2.129.15`). Crate names are unchanged from upstream on purpose — they are unpublished, so there is no registry conflict, and renaming them would touch every file in the workspace. The npm package is published separately as `@faicad/brepkit2-wasm` (see `xtask/src/wasm.rs::NPM_PKG_NAME`).
 
 ## Architecture
 
@@ -372,58 +367,33 @@ Quick reference — find the right file for any task:
 
 ## Ripple-Effect Checklists
 
-**These enums appear in `match` arms across many files. Adding a variant requires updating
-every match site or the code won't compile (unless a `_ =>` wildcard swallows it silently).**
+**These enums appear in `match` arms across many files. Adding a variant requires updating every match site or the code won't compile (unless a `_ =>` wildcard swallows it silently).**
 
-**Delegate methods reduce ripple scope:** `FaceSurface` has delegate methods (`evaluate`,
-`normal`, `project_point`, `estimate_radius`, `type_tag`, `is_planar`, `is_analytic`,
-`as_analytic`) and `EdgeCurve` has delegates (`evaluate_with_endpoints`,
-`tangent_with_endpoints`, `domain_with_endpoints`, `type_tag`) — see `math/src/traits.rs`.
-Call sites using these delegates need no update when adding new variants (only the delegate
-impl needs the new arm). The files below still use direct match arms.
+**Delegate methods reduce ripple scope:** `FaceSurface` has delegate methods (`evaluate`, `normal`, `project_point`, `estimate_radius`, `type_tag`, `is_planar`, `is_analytic`, `as_analytic`) and `EdgeCurve` has delegates (`evaluate_with_endpoints`, `tangent_with_endpoints`, `domain_with_endpoints`, `type_tag`) — see `math/src/traits.rs`. Call sites using these delegates need no update when adding new variants (only the delegate impl needs the new arm). The files below still use direct match arms.
 
 ### Adding an `EdgeCurve` variant
 
 `EdgeCurve` is defined in `topology/src/edge.rs`. Current variants: `Line`, `NurbsCurve`, `Circle`, `Ellipse`.
 
-`EdgeCurve::` is matched in ~100 files. Since the variants are exhaustive
-(no production `_ =>` wildcards — see below), the compiler flags every
-direct-match site when you add a variant; you do NOT need a hand-maintained
-list. Get the authoritative set with:
+`EdgeCurve::` is matched in ~100 files. Since the variants are exhaustive (no production `_ =>` wildcards — see below), the compiler flags every direct-match site when you add a variant; you do NOT need a hand-maintained list. Get the authoritative set with:
 
 ```bash
 rg -l 'EdgeCurve::' crates/*/src/
 ```
 
-Many call sites go through the `EdgeCurve` delegate methods
-(`evaluate_with_endpoints`, `tangent_with_endpoints`, `domain_with_endpoints`,
-`type_tag` — see `math/src/traits.rs`) and need no update; only the delegate
-impl needs the new arm. The high-traffic direct-match sites worth checking
-first: `operations/src/tessellate/`, `transform.rs`, `copy.rs`,
-`measure/edge_length.rs`, `section.rs`, `fill_face.rs`, `boolean/`,
-`io/src/{step,iges}/{reader,writer}.rs`, and
-`wasm/src/bindings/{query,batch,tessellate,nurbs}.rs`.
+Many call sites go through the `EdgeCurve` delegate methods (`evaluate_with_endpoints`, `tangent_with_endpoints`, `domain_with_endpoints`, `type_tag` — see `math/src/traits.rs`) and need no update; only the delegate impl needs the new arm. The high-traffic direct-match sites worth checking first: `operations/src/tessellate/`, `transform.rs`, `copy.rs`, `measure/edge_length.rs`, `section.rs`, `fill_face.rs`, `boolean/`, `io/src/{step,iges}/{reader,writer}.rs`, and `wasm/src/bindings/{query,batch,tessellate,nurbs}.rs`.
 
 ### Adding a `FaceSurface` variant
 
 `FaceSurface` is defined in `topology/src/face.rs`. Current variants: `Plane`, `Nurbs`, `Cylinder`, `Cone`, `Sphere`, `Torus`.
 
-`FaceSurface::` is matched in ~112 files. As with `EdgeCurve`, the variants
-are exhaustive, so the compiler flags every direct-match site. Get the
-authoritative set with:
+`FaceSurface::` is matched in ~112 files. As with `EdgeCurve`, the variants are exhaustive, so the compiler flags every direct-match site. Get the authoritative set with:
 
 ```bash
 rg -l 'FaceSurface::' crates/*/src/
 ```
 
-Many call sites go through the `FaceSurface` delegate methods (`evaluate`,
-`normal`, `project_point`, `estimate_radius`, `type_tag`, `is_planar`,
-`is_analytic`, `as_analytic` — see `math/src/traits.rs`) and need no update.
-The high-traffic direct-match sites worth checking first:
-`operations/src/tessellate/`, `transform.rs`, `copy.rs`, `section.rs`,
-`distance.rs`, `feature_recognition.rs`, `boolean/`, `offset_face.rs`,
-`io/src/{step,iges}/writer.rs`, and
-`wasm/src/bindings/{query,batch,tessellate,nurbs}.rs`.
+Many call sites go through the `FaceSurface` delegate methods (`evaluate`, `normal`, `project_point`, `estimate_radius`, `type_tag`, `is_planar`, `is_analytic`, `as_analytic` — see `math/src/traits.rs`) and need no update. The high-traffic direct-match sites worth checking first: `operations/src/tessellate/`, `transform.rs`, `copy.rs`, `section.rs`, `distance.rs`, `feature_recognition.rs`, `boolean/`, `offset_face.rs`, `io/src/{step,iges}/writer.rs`, and `wasm/src/bindings/{query,batch,tessellate,nurbs}.rs`.
 
 If the new surface is analytic, also update:
 - [ ] `math/src/analytic_intersection.rs` — `AnalyticSurface` enum (4 match sites)
@@ -432,9 +402,7 @@ If the new surface is analytic, also update:
 ## Common Pitfalls
 
 ### Borrow checker: "snapshot then allocate"
-When copying topology entities, you cannot borrow the arena immutably (to read) and
-mutably (to write) at the same time. Read all needed data into local variables first,
-then allocate new entities:
+When copying topology entities, you cannot borrow the arena immutably (to read) and mutably (to write) at the same time. Read all needed data into local variables first, then allocate new entities:
 ```rust
 // ✅ Correct: snapshot first
 let pos = topo.vertex(vid).position;
@@ -464,28 +432,19 @@ mod tests {
 ```
 
 ### Complex functions
-Add `#[allow(clippy::too_many_lines)]` above complex CAD operations rather than
-artificially splitting them.
+Add `#[allow(clippy::too_many_lines)]` above complex CAD operations rather than artificially splitting them.
 
 ### WASM binding blocks
-Multiple `#[wasm_bindgen] impl BrepKernel` blocks are needed — one for public
-JS-exposed methods, one for private helpers. This is a wasm-bindgen requirement.
+Multiple `#[wasm_bindgen] impl BrepKernel` blocks are needed — one for public JS-exposed methods, one for private helpers. This is a wasm-bindgen requirement.
 
 ### Wildcard match arms
-As of v1.3.2, all `EdgeCurve` and `FaceSurface` match arms use exhaustive
-patterns — no production `_ =>` wildcards remain. When adding a new variant,
-the compiler will flag every match site. Still worth a manual scan of these
-files since `_ =>` could be re-introduced:
+As of v1.3.2, all `EdgeCurve` and `FaceSurface` match arms use exhaustive patterns — no production `_ =>` wildcards remain. When adding a new variant, the compiler will flag every match site. Still worth a manual scan of these files since `_ =>` could be re-introduced:
 - `io/src/step/writer.rs`
 - `io/src/iges/writer.rs`
 - `operations/src/offset_face.rs`
 
 ### Walking faces in a solid
-A solid has both an `outer_shell()` and zero-or-more `inner_shells()`
-(cavity shells produced by `shell_op` and boolean cuts). A function
-that visits only `outer_shell()` will silently miss cavity faces on
-hollow solids. Default to `topology::explorer::solid_faces`, which
-flattens outer + inner shells into a single `Vec<FaceId>`:
+A solid has both an `outer_shell()` and zero-or-more `inner_shells()` (cavity shells produced by `shell_op` and boolean cuts). A function that visits only `outer_shell()` will silently miss cavity faces on hollow solids. Default to `topology::explorer::solid_faces`, which flattens outer + inner shells into a single `Vec<FaceId>`:
 
 ```rust
 // ✅ Correct: covers cavity faces too
@@ -498,16 +457,10 @@ let shell = topo.shell(solid_data.outer_shell())?;
 let face_ids = shell.faces().to_vec();
 ```
 
-Exceptions: operations that are fundamentally per-shell (orientation
-fixes, sewing, "don't empty this shell" guards) should still iterate
-shell-by-shell — call `solid_faces` only when the operation is
-solid-scoped (counting, recognition, type-conversion). The
-`heal::fix::small_face` pattern (top-level loop over shells +
-per-shell helper with its own guard) is the template for those.
+Exceptions: operations that are fundamentally per-shell (orientation fixes, sewing, "don't empty this shell" guards) should still iterate shell-by-shell — call `solid_faces` only when the operation is solid-scoped (counting, recognition, type-conversion). The `heal::fix::small_face` pattern (top-level loop over shells + per-shell helper with its own guard) is the template for those.
 
 ### Dev-dependency cycles
-Never add `brepkit-operations` as a dev-dependency of `brepkit-topology` — this
-creates a "two versions" error. Use the `test-utils` feature flag instead.
+Never add `brepkit-operations` as a dev-dependency of `brepkit-topology` — this creates a "two versions" error. Use the `test-utils` feature flag instead.
 
 ## Cookbook: Common Agent Tasks
 
@@ -536,11 +489,9 @@ Pattern: see `obj/` module (simplest), `step/` (most complex)
 3. **Writer signature**: text formats return `String`, binary formats return `Vec<u8>`:
    - B-Rep, text: `pub fn write_step(topo: &Topology, solids: &[SolidId]) -> Result<String, IoError>`
    - Mesh, binary: `pub fn write_ply(..., deflection: f64) -> Result<Vec<u8>, IoError>`
-4. **Reader signature**: the input comes first, `topo` second, and B-Rep readers return
-   every solid in the file:
+4. **Reader signature**: the input comes first, `topo` second, and B-Rep readers return every solid in the file:
    - B-Rep: `pub fn read_step(input: &str, topo: &mut Topology) -> Result<Vec<SolidId>, IoError>`
-   - Mesh formats pair a `read_ply(data) -> TriangleMesh` with a
-     `read_ply_solid(..) -> SolidId` that also needs `&mut Topology`
+- Mesh formats pair a `read_ply(data) -> TriangleMesh` with a `read_ply_solid(..) -> SolidId` that also needs `&mut Topology`
 5. **Add WASM bindings** `importFormat` / `exportFormat` in `bindings/io.rs`
 6. **Add to `executeBatch` dispatch** in `bindings/batch.rs` if commonly used
 
@@ -557,8 +508,7 @@ Pattern: see `extrude.rs` (basic), `boolean/` (complex)
 
 ### Recipe 4: Add a new WASM binding
 
-Pick the appropriate `bindings/` module (or create a new one). Each module adds
-methods to `BrepKernel` via a separate `#[wasm_bindgen] impl` block.
+Pick the appropriate `bindings/` module (or create a new one). Each module adds methods to `BrepKernel` via a separate `#[wasm_bindgen] impl` block.
 
 ```rust
 // In bindings/my_domain.rs:
@@ -584,8 +534,7 @@ Key points:
 - Return entity IDs as `u32` (auto-converted to JS number)
 - Errors use `?` operator (WasmError → JsError via blanket `From` impl)
 - Add a `batch_*` companion fn if the op should be in `executeBatch`
-- Add contract tests using `execute_batch()` (not direct method calls,
-  since `JsError` can't be constructed on non-wasm targets)
+- Add contract tests using `execute_batch()` (not direct method calls, since `JsError` can't be constructed on non-wasm targets)
 
 ## Commands
 

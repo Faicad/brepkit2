@@ -1,0 +1,26 @@
+# Skill: brepkit2 Doc Standards
+
+When writing or editing documentation in the brepkit2 repository, follow these standards.
+
+## Where to put documents
+
+- **Standing reference** (architecture, API, workflows) → `docs/*.md`
+- **User guide** (mdBook-rendered) → `book/src/*.md`
+- **Design document** (requirements, plan) → `docs/plans/yyyy-mm-dd-topic.md`
+- **Technical analysis** → `docs/analysis/`
+- **Decision record** → `.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md`
+- **Reusable workflow** → `.claude/skills/<skill-name>/SKILL.md`
+- **Session instructions** → `CLAUDE.md` / `AGENTS.md` (root or subtree)
+
+## Rules
+
+1. One home per fact — don't duplicate rules across documents
+2. Record current state, not history — history goes in commit messages
+3. One physical line per prose paragraph
+4. Bilingual pairing required for standing docs and Agent Notes (not for `docs/plans/`, `docs/analysis/`, or `book/src/`)
+5. Run `npm run doc-sync` before submitting
+
+## See also
+
+- [docs/AGENTS.md](../../../docs/AGENTS.md) — full documentation standard
+- [.agents/notes/README.md](../../../.agents/notes/README.md) — Agent Note format

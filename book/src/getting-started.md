@@ -25,8 +25,7 @@ cargo build -p brepkit-wasm --target wasm32-unknown-unknown
 
 ## Using from JavaScript and TypeScript
 
-The maintained JS surface is the `@faicad/brepkit2-wasm` package, built from
-`crates/wasm`. It ships its own TypeScript declarations.
+The maintained JS surface is the `@faicad/brepkit2-wasm` package, built from `crates/wasm`. It ships its own TypeScript declarations.
 
 ```bash
 npm install @faicad/brepkit2-wasm

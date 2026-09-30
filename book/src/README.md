@@ -2,10 +2,7 @@
 
 A B-Rep modeling kernel in Rust, compiled to WebAssembly.
 
-brepkit2 is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream tag
-`v2.129.15`). It handles NURBS geometry, boolean operations, filleting,
-tessellation, and data exchange — in memory-safe Rust with first-class WASM
-support.
+brepkit2 is a fork of [brepkit](https://github.com/andymai/brepkit) (upstream tag `v2.129.15`). It handles NURBS geometry, boolean operations, filleting, tessellation, and data exchange — in memory-safe Rust with first-class WASM support.
 
 ## Why brepkit2?
 

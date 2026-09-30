@@ -2,22 +2,13 @@
 
 # brepkit2
 
+English | [中文](README.zh.md)
+
 Solid modeling kernel for Rust and WebAssembly.
 
-> **This is a fork.** `brepkit2` is an independent fork of
-> [brepkit](https://github.com/andymai/brepkit) by Andy Mai, taken at upstream
-> tag `v2.129.15` (2026-08-07) and developed independently since. Upstream is
-> dual-licensed MIT OR Apache-2.0; this fork keeps that licensing, the original
-> copyright notices, and the crate names. It is not affiliated with or endorsed
-> by the upstream author. Changes land here first — see
-> [CHANGELOG.md](CHANGELOG.md).
+> **This is a fork.** `brepkit2` is an independent fork of [brepkit](https://github.com/andymai/brepkit) by Andy Mai, taken at upstream tag `v2.129.15` (2026-08-07) and developed independently since. Upstream is dual-licensed MIT OR Apache-2.0; this fork keeps that licensing, the original copyright notices, and the crate names. It is not affiliated with or endorsed by the upstream author. Changes land here first — see [CHANGELOG.md](CHANGELOG.md).
 
-[![CI](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml/badge.svg)](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@faicad/brepkit2-wasm)](https://www.npmjs.com/package/@faicad/brepkit2-wasm)
-[![Last release](https://img.shields.io/github/release-date/Faicad/brepkit2?label=last%20release)](https://github.com/Faicad/brepkit2/releases)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/Faicad/brepkit2?label=commits%2Fmonth)](https://github.com/Faicad/brepkit2/commits/main)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/) [![unsafe denied](https://img.shields.io/badge/unsafe-denied-success.svg)](#why-a-cad-kernel)
+[![CI](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml/badge.svg)](https://github.com/Faicad/brepkit2/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/@faicad/brepkit2-wasm)](https://www.npmjs.com/package/@faicad/brepkit2-wasm) [![Last release](https://img.shields.io/github/release-date/Faicad/brepkit2?label=last%20release)](https://github.com/Faicad/brepkit2/releases) [![Commit activity](https://img.shields.io/github/commit-activity/m/Faicad/brepkit2?label=commits%2Fmonth)](https://github.com/Faicad/brepkit2/commits/main) [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license) [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/) [![unsafe denied](https://img.shields.io/badge/unsafe-denied-success.svg)](#why-a-cad-kernel)
 
 **[Architecture](#architecture)** · **[Performance](#performance)** · **[Getting Started](#getting-started)** · **[Known Limitations](#known-limitations)** · **[Contributing](./CONTRIBUTING.md)**
 

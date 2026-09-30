@@ -2,13 +2,31 @@
   "private": true,
   "name": "brepkit2-workspace",
   "description": "Development tooling for the brepkit2 workspace",
+  "type": "module",
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "verify-md-links": "npx tsx scripts/verify-md-links.ts",
+    "verify-md-wrap": "npx tsx scripts/verify-md-wrap.ts",
+    "verify-mermaid": "npx tsx scripts/verify-mermaid.ts",
+    "verify-agent-note-format": "npx tsx scripts/verify-agent-note-format.ts",
+    "verify-agent-note-classification": "npx tsx scripts/verify-agent-note-classification.ts",
+    "verify-archived-agent-notes": "npx tsx scripts/verify-archived-agent-notes.ts",
+    "verify-translation-pairing": "npx tsx scripts/verify-translation-pairing.ts",
+    "verify-doc-refs": "npx tsx scripts/verify-doc-refs.ts",
+    "archive-plans": "node scripts/archive-plans.mjs",
+    "doc-sync": "npx tsx scripts/verify-md-links.ts && npx tsx scripts/verify-md-wrap.ts && npx tsx scripts/verify-agent-note-format.ts && npx tsx scripts/verify-agent-note-classification.ts && npx tsx scripts/verify-translation-pairing.ts && npx tsx scripts/verify-mermaid.ts && npx tsx scripts/verify-doc-refs.ts && npx tsx scripts/verify-archived-agent-notes.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.0.2",
     "husky": "^9.0.0",
-    "prettier": "^3.9.6"
+    "jsdom": "^29.1.1",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "mermaid": "^12.0.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
   }
 }

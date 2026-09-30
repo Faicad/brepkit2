@@ -1,12 +1,8 @@
 # Architecture
 
-brepkit2 is a B-Rep modeling kernel. It handles the underlying B-Rep modeling —
-geometry evaluation, boolean operations, tessellation, and data exchange — and
-exposes it to Rust callers directly and to JavaScript through the
-`brepkit-wasm` crate (published to npm as `@faicad/brepkit2-wasm`).
+brepkit2 is a B-Rep modeling kernel. It handles the underlying B-Rep modeling — geometry evaluation, boolean operations, tessellation, and data exchange — and exposes it to Rust callers directly and to JavaScript through the `brepkit-wasm` crate (published to npm as `@faicad/brepkit2-wasm`).
 
-brepkit2 uses a strict layered architecture. Each layer may only depend on
-layers below it, never above or sideways.
+brepkit2 uses a strict layered architecture. Each layer may only depend on layers below it, never above or sideways.
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -40,13 +36,11 @@ layers below it, never above or sideways.
 | `brepkit-wasm` | L4 | All workspace crates |
 | `brepkit-render` | L4 | `math`, `topology`, `operations` |
 
-These rules are enforced by `scripts/check-boundaries.sh`, which runs in CI.
-`brepkit-render` is a leaf: nothing may depend on it.
+These rules are enforced by `scripts/check-boundaries.sh`, which runs in CI. `brepkit-render` is a leaf: nothing may depend on it.
 
 ## Arena-Based Topology
 
-All topological entities (vertices, edges, faces, etc.) are stored in a
-central `Arena` and referenced by typed index handles. This approach:
+All topological entities (vertices, edges, faces, etc.) are stored in a central `Arena` and referenced by typed index handles. This approach:
 
 - Avoids reference counting overhead (`Rc`/`Arc`)
 - Enables cache-friendly traversal (data locality)
@@ -55,21 +49,12 @@ central `Arena` and referenced by typed index handles. This approach:
 
 ## Analytic Geometry, with NURBS as the General Case
 
-Curves and surfaces are enums, not a single universal representation.
-`FaceSurface` is one of `Plane`, `Cylinder`, `Cone`, `Sphere`, `Torus`, or
-`Nurbs`; `EdgeCurve` is one of `Line`, `Circle`, `Ellipse`, or `NurbsCurve`.
+Curves and surfaces are enums, not a single universal representation. `FaceSurface` is one of `Plane`, `Cylinder`, `Cone`, `Sphere`, `Torus`, or `Nurbs`; `EdgeCurve` is one of `Line`, `Circle`, `Ellipse`, or `NurbsCurve`.
 
-Analytic types are deliberately special-cased rather than collapsed into
-NURBS:
+Analytic types are deliberately special-cased rather than collapsed into NURBS:
 
-- Operations preserve them. A cylinder cut by a plane stays a `Cylinder`,
-  so face counts stay low across chained booleans instead of growing with
-  every step.
-- Intersections take exact closed-form paths where a pair allows one
-  (see `math/src/analytic_intersection.rs`), falling back to NURBS
-  marching only when no analytic solution exists.
-- STEP export writes them as native surface entities, so a round-trip is
-  lossless rather than an approximation.
+- Operations preserve them. A cylinder cut by a plane stays a `Cylinder`, so face counts stay low across chained booleans instead of growing with every step.
+- Intersections take exact closed-form paths where a pair allows one (see `math/src/analytic_intersection.rs`), falling back to NURBS marching only when no analytic solution exists.
+- STEP export writes them as native surface entities, so a round-trip is lossless rather than an approximation.
 
-NURBS is the general representation that everything can convert into, and
-the one used for free-form geometry. It is the fallback, not the default.
+NURBS is the general representation that everything can convert into, and the one used for free-form geometry. It is the fallback, not the default.
