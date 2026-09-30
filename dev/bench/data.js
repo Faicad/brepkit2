@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790771447190,
+  "lastUpdate": 1790771753181,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -485,6 +485,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24798131,
             "range": "± 181854",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "7efc6ddee97f337563e07b8a999e595656322193",
+          "message": "fix(ci): add osv-scanner.toml to allowlist unmaintained ttf-parser\n\nosv-scanner does not read deny.toml, so RUSTSEC-2026-0192 kept failing\nthe blocking scan despite the cargo-deny allowlist. Mirror the ignore\nin osv-scanner.toml at the repo root (same scope as Cargo.lock).",
+          "timestamp": "2026-09-30T20:31:44+08:00",
+          "tree_id": "4412bffcb59745f3e6a5d487dea2417271860df0",
+          "url": "https://github.com/Faicad/brepkit2/commit/7efc6ddee97f337563e07b8a999e595656322193"
+        },
+        "date": 1790771752076,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 973613,
+            "range": "± 12719",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1055826,
+            "range": "± 14863",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11982,
+            "range": "± 97",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 716805,
+            "range": "± 4754",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24901235,
+            "range": "± 50190",
             "unit": "ns/iter"
           }
         ]
