@@ -1,8 +1,10 @@
 //! Reproducer tests for gridfinity-layout-tool dual-kernel failures.
 //!
 //! These tests reproduce the scenarios from issues #258, #259, #260 using
-//! WASM contract tests via `execute_batch()`. Tests that reproduce known
-//! bugs are marked `#[ignore]` with a comment linking to the issue.
+//! WASM contract tests via `execute_batch()`. Hardened steps (fillet/fuse
+//! reproducers) require the operation to succeed, so a regression fails the
+//! test loudly; the remaining compound-boolean reproducers only require the
+//! batch to return without panicking.
 //!
 //! # Categories
 //!
@@ -282,9 +284,7 @@ fn fillet_then_compound_cut() {
         r#"[{{"op": "fillet", "args": {{"solid": 0, "radius": 1.0, "edges": [{edge0}]}}}}]"#
     ));
     let p2 = parse_batch(&r2);
-    if p2[0].get("error").is_some() {
-        return; // Fillet failed — skip compound cut.
-    }
+    assert_ok(&p2, 0); // fillet must succeed
     // Batch 3: cylinder tools + compoundCut on the filleted solid (handle 1).
     let r3 = k.execute_batch(
         r#"[
@@ -296,7 +296,7 @@ fn fillet_then_compound_cut() {
     ]"#,
     );
     let p3 = parse_batch(&r3);
-    assert_no_crash(&p3, 4, "fillet + compoundCut");
+    assert_ok(&p3, 4); // compoundCut must succeed
 }
 
 /// Sequential 5-cylinder cuts (not compound — one at a time).
@@ -422,9 +422,7 @@ fn batch_fuse_cut_fillet_compound() {
         r#"[{{"op": "fillet", "args": {{"solid": 3, "radius": 0.5, "edges": [{edge0}]}}}}]"#
     ));
     let p2 = parse_batch(&r2);
-    if p2[0].get("error").is_some() {
-        return; // Fillet failed — skip compound cut.
-    }
+    assert_ok(&p2, 0); // fillet must succeed
 
     // Batch 3: cylinder tools + compoundCut on filleted solid (handle 4).
     // Solids: 5=cylinder, 6-8=cyl-copies, 9=compoundCut
@@ -438,7 +436,7 @@ fn batch_fuse_cut_fillet_compound() {
     ]"#,
     );
     let p3 = parse_batch(&r3);
-    assert_no_crash(&p3, 4, "full pipeline (fuse+fillet+compoundCut)");
+    assert_ok(&p3, 4); // compoundCut must succeed
 }
 
 /// Compound cut with several tools, then measure.
@@ -1266,14 +1264,7 @@ fn gridfinity_d2_lip_ring_with_fillet() {
         r#"[{{"op": "fillet", "args": {{"solid": {lip_handle}, "radius": {TOP_FILLET}, "edges": [{edge0}]}}}}]"#
     ));
     let p5 = parse_batch(&r5);
-
-    if p5[0].get("error").is_some() {
-        eprintln!(
-            "D2 fillet failed (expected for known bugs): {}",
-            p5[0]["error"]
-        );
-        return; // Fillet failure is the bug we're tracking
-    }
+    assert_ok(&p5, 0); // fillet must succeed
 
     let filleted = p5[0]["ok"].as_u64().unwrap() as u32;
 
@@ -1389,11 +1380,7 @@ fn gridfinity_d3_shelled_box_with_lip() {
         r#"[{{"op": "fuse", "args": {{"solidA": {box_handle}, "solidB": {lip_handle}}}}}]"#
     ));
     let p7 = parse_batch(&r7);
-
-    if p7[0].get("error").is_some() {
-        eprintln!("D3 fuse failed: {}", p7[0]["error"]);
-        return;
-    }
+    assert_ok(&p7, 0); // fuse must succeed
 
     let fused = p7[0]["ok"].as_u64().unwrap() as u32;
     let r8 = k.execute_batch(&format!(
@@ -1674,11 +1661,7 @@ fn gridfinity_d4_full_1x1_bin() {
         r#"[{{"op": "fuse", "args": {{"solidA": {shelled}, "solidB": {lip_handle}}}}}]"#
     ));
     let p8 = parse_batch(&r8);
-
-    if p8[0].get("error").is_some() {
-        eprintln!("D4 fuse failed: {}", p8[0]["error"]);
-        return;
-    }
+    assert_ok(&p8, 0); // fuse must succeed
     let fused = p8[0]["ok"].as_u64().unwrap() as u32;
 
     // Step 5: Measure final solid
