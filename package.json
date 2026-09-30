@@ -17,16 +17,16 @@
     "doc-sync": "npx tsx scripts/verify-md-links.ts && npx tsx scripts/verify-md-wrap.ts && npx tsx scripts/verify-agent-note-format.ts && npx tsx scripts/verify-agent-note-classification.ts && npx tsx scripts/verify-translation-pairing.ts && npx tsx scripts/verify-mermaid.ts && npx tsx scripts/verify-doc-refs.ts && npx tsx scripts/verify-archived-agent-notes.ts"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.2.1",
+    "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.0.2",
     "husky": "^9.0.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm": "^3.1.0",
     "mermaid": "^12.0.0",
     "micromark-extension-gfm": "^3.0.0",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   }
 }
