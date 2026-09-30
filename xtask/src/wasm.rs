@@ -92,6 +92,41 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
+/// Build a `Command` for a bare tool name, resolving npm's `.cmd` shims.
+///
+/// npm installs Windows wrappers as `tool.cmd` next to an extensionless sh
+/// script. `std::process::Command` does not apply PATHEXT resolution (the
+/// extensionless file is a sh script, useless on Windows) and will not spawn
+/// `.cmd`/`.bat` files itself, so the plain spawn fails even though the
+/// PATHEXT scan in `command_exists` reports the tool as present. When the
+/// resolved executable is a `.cmd`/`.bat` shim, route the call through
+/// `cmd /C`, which performs the normal shell resolution.
+fn tool_command(name: &str) -> Command {
+    #[cfg(windows)]
+    {
+        if is_cmd_shim(name) {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg(name);
+            return cmd;
+        }
+    }
+    Command::new(name)
+}
+
+#[cfg(windows)]
+fn is_cmd_shim(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .any(|dir| {
+            [".cmd", ".bat"]
+                .iter()
+                .any(|ext| is_executable_file(&dir.join(format!("{name}{ext}"))))
+        })
+}
+
 /// The `wasm-bindgen` version pinned in the workspace `Cargo.toml`.
 ///
 /// wasm-bindgen-cli must match the `wasm-bindgen` crate version exactly or it
@@ -213,7 +248,7 @@ pub fn run_wasm_opt() -> Result<()> {
 
     let opt_file = wasm_file.with_extension("wasm.opt");
     run_cmd(
-        Command::new("wasm-opt")
+        tool_command("wasm-opt")
             .args(["-O3"])
             .arg(&wasm_file)
             .args(["-o"])
