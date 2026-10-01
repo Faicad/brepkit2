@@ -63,6 +63,7 @@ const VERTEX_TOL: f64 = 1e-7;
 const PARAM_TOL: f64 = 1e-10;
 
 /// A point where the contact line crosses a face boundary edge.
+#[derive(Debug, Clone, Copy)]
 struct BoundaryHit {
     /// Index into the wire's oriented-edge list.
     edge_idx: usize,
@@ -70,6 +71,104 @@ struct BoundaryHit {
     t: f64,
     /// 3D intersection point.
     point_3d: Point3,
+}
+
+/// Distance below which a crossing counts as landing on a boundary vertex.
+///
+/// Matches the tolerance new vertices are minted with, so anything closer than
+/// this to an existing vertex is that vertex as far as any downstream welding
+/// or validation is concerned.
+const SNAP_TOL: f64 = 1e-7;
+
+/// A contact-line crossing resolved into the two boundary runs it produces.
+///
+/// A crossing strictly inside an edge splits it into two new sub-edges. One
+/// landing on an existing boundary vertex needs no new topology at all: the
+/// run on one side is empty, the run on the other is the whole edge, and every
+/// face reaching that vertex already agrees on where it is. Splitting anyway
+/// would mint a zero-length sub-edge plus a duplicate vertex that differs from
+/// the original by one rounding step, reopening the seam it just closed.
+struct EdgeSplit {
+    /// Vertex standing at the crossing.
+    vertex: VertexId,
+    /// Oriented run before the crossing; `None` when it lands on the edge's
+    /// own start vertex.
+    pre: Option<OrientedEdge>,
+    /// Oriented run after the crossing; `None` at the end vertex.
+    post: Option<OrientedEdge>,
+    /// Edges minted here — empty for a snapped crossing.
+    created_edges: Vec<EdgeId>,
+    /// Vertices minted here — empty for a snapped crossing.
+    created_vertices: Vec<VertexId>,
+}
+
+/// Collapse crossings reporting the same geometric point.
+///
+/// Every wire position touching a vertex reports the crossing on its own, so a
+/// crossing through a boundary vertex arrives once per adjacent sub-edge.
+/// That is what breaks a box fillet: the neighbour faces trimmed earlier split
+/// this face's boundary at exactly those points, so the second and later
+/// contact lines of a face whose first line has already been processed arrive
+/// as four hits instead of two.
+fn dedup_crossings(hits: &mut Vec<BoundaryHit>) {
+    let mut keep: Vec<BoundaryHit> = Vec::with_capacity(hits.len());
+    for &hit in hits.iter() {
+        let duplicated = keep
+            .iter()
+            .any(|k| (k.point_3d - hit.point_3d).length() <= SNAP_TOL);
+        if !duplicated {
+            keep.push(hit);
+        }
+    }
+    *hits = keep;
+}
+
+/// Resolve one crossing against the oriented edge it lies on.
+///
+/// # Errors
+///
+/// Returns [`BlendError::Topology`] if arena lookups fail, or
+/// [`BlendError::TrimmingFailure`] if the edge cannot be split.
+fn split_at_crossing(
+    topo: &mut Topology,
+    oe: &OrientedEdge,
+    hit: &BoundaryHit,
+) -> Result<EdgeSplit, BlendError> {
+    let (start_vid, end_vid, start_pt, end_pt) = {
+        let edge = topo.edge(oe.edge())?;
+        let s = oe.oriented_start(edge);
+        let e = oe.oriented_end(edge);
+        (s, e, topo.vertex(s)?.point(), topo.vertex(e)?.point())
+    };
+
+    if (hit.point_3d - start_pt).length() <= SNAP_TOL {
+        return Ok(EdgeSplit {
+            vertex: start_vid,
+            pre: None,
+            post: Some(*oe),
+            created_edges: Vec::new(),
+            created_vertices: Vec::new(),
+        });
+    }
+    if (hit.point_3d - end_pt).length() <= SNAP_TOL {
+        return Ok(EdgeSplit {
+            vertex: end_vid,
+            pre: Some(*oe),
+            post: None,
+            created_edges: Vec::new(),
+            created_vertices: Vec::new(),
+        });
+    }
+
+    let vid = topo.add_vertex(Vertex::new(hit.point_3d, VERTEX_TOL));
+    let (sub1, sub2) = split_edge_at(topo, oe, vid)?;
+    Ok(EdgeSplit {
+        vertex: vid,
+        pre: Some(sub1),
+        post: Some(sub2),
+        created_edges: vec![sub1.edge(), sub2.edge()],
+        created_vertices: vec![vid],
+    })
 }
 
 /// Trim a face along a contact curve, keeping the side away from the fillet.
@@ -176,7 +275,13 @@ pub fn trim_face(
         }
     }
 
-    // We expect exactly 2 hits for a convex planar face.
+    // We expect exactly 2 hits for a convex planar face — but counted as
+    // *distinct crossing points*. A crossing that lands on a boundary vertex
+    // is reported once for every wire position that touches it (the tail of
+    // one edge and the head of the next), so coincident duplicates have to be
+    // collapsed first: see [`dedup_crossings`].
+    dedup_crossings(&mut hits);
+
     if hits.len() != 2 {
         return Err(BlendError::TrimmingFailure { face: face_id });
     }
@@ -206,19 +311,14 @@ pub fn trim_face(
         return Err(BlendError::TrimmingFailure { face: face_id });
     }
 
-    let va_id = topo.add_vertex(Vertex::new(hit_a.point_3d, VERTEX_TOL));
-    let vb_id = topo.add_vertex(Vertex::new(hit_b.point_3d, VERTEX_TOL));
+    let split_a = split_at_crossing(topo, &edge_data[hit_a.edge_idx].0, hit_a)?;
+    let split_b = split_at_crossing(topo, &edge_data[hit_b.edge_idx].0, hit_b)?;
 
-    // Each hit splits one oriented edge into two sub-edges:
-    //   original: oriented from S→E
-    //   sub-edge 1: S → V_hit  (forward w.r.t. original orientation)
-    //   sub-edge 2: V_hit → E
-    let (sub_a1, sub_a2) = split_edge_at(topo, &edge_data[hit_a.edge_idx].0, va_id)?;
-    let (sub_b1, sub_b2) = split_edge_at(topo, &edge_data[hit_b.edge_idx].0, vb_id)?;
-
-    // The contact edge connects the two intersection vertices.
-    // Its direction determines which side is "left" vs "right".
-    let contact_edge_id = topo.add_edge(Edge::new(va_id, vb_id, EdgeCurve::Line));
+    // The contact edge connects the two crossing vertices. Existing vertices
+    // are reused rather than duplicated: when a crossing snaps onto one, both
+    // sides must reference the same `VertexId` or the faces sharing it drift
+    // apart by one tolerance.
+    let contact_edge_id = topo.add_edge(Edge::new(split_a.vertex, split_b.vertex, EdgeCurve::Line));
 
     // The contact line divides the boundary edges into two chains:
     //   Chain 1: edges from hit_a to hit_b (in wire order)
@@ -228,23 +328,25 @@ pub fn trim_face(
 
     let n_edges = edge_data.len();
 
+    // A run can be missing: a crossing that snaps onto an edge's own end
+    // vertex leaves no sub-run on that side, and the edge is contributed whole
+    // to whichever chain owns the run it does have.
     let mut chain1: Vec<OrientedEdge> = Vec::new();
-    let mut chain2: Vec<OrientedEdge> = Vec::new();
-
-    chain1.push(sub_a2);
+    chain1.extend(split_a.post);
     for i in (hit_a.edge_idx + 1)..hit_b.edge_idx {
         chain1.push(oriented_edges[i]);
     }
-    chain1.push(sub_b1);
+    chain1.extend(split_b.pre);
 
-    chain2.push(sub_b2);
+    let mut chain2: Vec<OrientedEdge> = Vec::new();
+    chain2.extend(split_b.post);
     for i in (hit_b.edge_idx + 1)..n_edges {
         chain2.push(oriented_edges[i]);
     }
     for i in 0..hit_a.edge_idx {
         chain2.push(oriented_edges[i]);
     }
-    chain2.push(sub_a1);
+    chain2.extend(split_a.pre);
 
     // Use the face plane normal and contact direction to determine left/right.
     let face_normal = match &surface {
@@ -264,19 +366,23 @@ pub fn trim_face(
 
     let contact_dir = hit_b.point_3d - hit_a.point_3d;
 
-    // Take a sample point from chain 1 to determine which side it is on.
-    let sample_pt = edge_data
-        .get(if hit_a.edge_idx + 1 < hit_b.edge_idx {
-            hit_a.edge_idx + 1
-        } else {
-            hit_a.edge_idx
-        })
-        .map(|(_, s, _)| *s)
-        .ok_or(BlendError::TrimmingFailure { face: face_id })?;
-
-    let to_sample = sample_pt - hit_a.point_3d;
-    let cross = contact_dir.cross(to_sample);
-    let chain1_is_left = face_normal.dot(cross) > 0.0;
+    // Which side does chain 1 lie on? Probe every vertex the chain reaches and
+    // keep the one furthest from the contact line. A fixed sample cannot do:
+    // once a crossing snaps onto an existing vertex, the first point of the
+    // chain sits ON the line, the cross product vanishes, and the sign flips
+    // to whichever side rounding happens to pick.
+    let mut best_side: Option<f64> = None;
+    for oe in &chain1 {
+        let edge = topo.edge(oe.edge())?;
+        for vid in [oe.oriented_start(edge), oe.oriented_end(edge)] {
+            let q = topo.vertex(vid)?.point();
+            let side = face_normal.dot(contact_dir.cross(q - hit_a.point_3d));
+            if best_side.is_none_or(|best| side.abs() > best.abs()) {
+                best_side = Some(side);
+            }
+        }
+    }
+    let chain1_is_left = best_side.ok_or(BlendError::TrimmingFailure { face: face_id })? > 0.0;
 
     let keep_side = match keep {
         TrimKeep::Side(side) => side,
@@ -322,12 +428,10 @@ pub fn trim_face(
     }
     let trimmed_face_id = topo.add_face(trimmed_face);
 
-    let new_edges = vec![sub_a1.edge(), sub_a2.edge(), sub_b1.edge(), sub_b2.edge()];
-
     Ok(TrimResult {
         trimmed_face: trimmed_face_id,
-        new_edges,
-        new_vertices: vec![va_id, vb_id],
+        new_edges: [split_a.created_edges, split_b.created_edges].concat(),
+        new_vertices: [split_a.created_vertices, split_b.created_vertices].concat(),
         contact_edge: Some(contact_edge_id),
     })
 }
@@ -1136,6 +1240,59 @@ mod tests {
             }
             _ => panic!("expected both faces to be Plane"),
         }
+    }
+
+    /// A contact line ending exactly on a boundary vertex must still trim.
+    ///
+    /// This is the box-fillet case in miniature. Trimming an earlier contact
+    /// line splits the boundary at a point later lines want to start from, so
+    /// the later line's endpoint is reported once per wire position touching
+    /// that vertex — three hits for two distinct points. Counting positions
+    /// rejects the trim, the face keeps its original extent, and the filleted
+    /// solid retains material it should have lost.
+    #[test]
+    fn trim_through_an_existing_boundary_vertex() {
+        let mut topo = Topology::new();
+        let (face_id, _verts, _edges) = make_square_face(&mut topo);
+
+        // First pass: drop everything left of x = 0.5, which splits the top
+        // and bottom edges and leaves their split vertices on the boundary.
+        let first = trim_face_general(
+            &mut topo,
+            face_id,
+            &[Point3::new(0.5, 0.0, 0.0), Point3::new(0.5, 1.0, 0.0)],
+            TrimKeep::AwayFrom(Point3::new(0.0, 0.0, 0.0)),
+        )
+        .expect("the first trim should succeed");
+        assert_ne!(first.trimmed_face, face_id, "first trim must bite");
+
+        // Second pass: from that very vertex (0.5, 0) diagonally to the middle
+        // of the right edge. The start point belongs to two wire positions, so
+        // it is reported twice; only one further hit is new.
+        let second = trim_face_general(
+            &mut topo,
+            first.trimmed_face,
+            &[Point3::new(0.5, 0.0, 0.0), Point3::new(1.0, 0.5, 0.0)],
+            TrimKeep::AwayFrom(Point3::new(0.5, 1.0, 0.0)),
+        )
+        .expect("a contact line ending on a boundary vertex must still trim");
+
+        // The diagonal crossing on the right edge is the only new point; the
+        // corner vertex is reused rather than duplicated.
+        assert_eq!(
+            second.new_vertices.len(),
+            1,
+            "only the interior crossing may mint a vertex — the shared corner must be reused"
+        );
+        let wire = topo
+            .wire(topo.face(second.trimmed_face).unwrap().outer_wire())
+            .unwrap();
+        assert_eq!(
+            wire.edges().len(),
+            3,
+            "keeping the triangle (0.5,0)-(1,0)-(1,0.5) leaves three boundary runs"
+        );
+        assert_wire_connected(&topo, second.trimmed_face);
     }
 
     #[test]

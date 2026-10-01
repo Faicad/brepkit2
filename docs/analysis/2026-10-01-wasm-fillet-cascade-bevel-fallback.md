@@ -121,4 +121,87 @@ cargo test -p brepkit-operations --test regress_fillet_cascade
 cargo test -p brepkit-operations --test regress_fillet_cascade -- --ignored
 ```
 
+```
+cargo test -p brepkit-operations --test regress_fillet_cascade
+cargo test -p brepkit-operations --test regress_fillet_cascade -- --ignored
+```
+
 本次改动未修改任何产品代码：`crates/operations/src/fillet/rolling_ball.rs` 的 setback 判据 `total >= e_len` 保持原样，放宽它的实验（见「已排除的路径」）连同注释一并撤回。
+
+---
+
+## 2026-10-01 续：trimmer 重复计数 —— 已修复
+
+后续轮次把「`fillet_v2` 在盒体上通用偏大」单独拆出来复现并**修复了一个独立缺陷**。结论先行：本文先前「三种闭式推导互不自洽」的犹豫可以收回，`975.59` 那一个是对的（见下）。
+
+### 闭式解不再是悬案
+
+盒体全棱圆角是「先按 `r` 内缩再填充半径 `r` 的球」这两个 Minkowski 步骤的复合，`K ⊕ B_r` 的 Steiner 公式直接给出体积：
+
+```text
+  x = lx - 2r, y = ly - 2r, z = lz - 2r
+  V = xyz                              内核
+    + 2r (xy + yz + xz)                6 个面板平移体
+    + pi r^2 (x + y + z)               12 条四分之一圆柱带
+    + (4/3) pi r^3                     8 个八分之一球
+```
+
+两条独立证据锁定它：
+
+1. **一阶展开**：`V = lx·ly·lz - 2.5752·(lx+ly+lz)·r² + O(r³)`。线性项精确抵消，所以「偏差 ∝ r」的实现必定是错的，`r → 0` 时必须收敛到未圆角体积（实测 `r=1e-3` 时 `999.99997`）。
+2. **跨引擎对照**：`fillet_rolling_ball` 是另一套求解器（解析接触点，不走 walking），它在 `r = 0.1 / 0.5 / 1.0 / 2.0` 上全部复现该闭式解到测量精度（`r=1` → 实测 `975.332`，闭式 `975.587`）。度量路径与期望值彼此印证，因此 `fillet_v2` 的偏差只能来自它自己。
+
+`crates/operations/tests/fillet_box_volume.rs` 把这两条固化成了对照组。
+
+### 根因：接触点落在已有顶点上被重复计数
+
+`trimmer::trim_face` 要求接触线与面边界恰好有 **2 个交点**，否则返回 `TrimmingFailure`。这个计数数的是**wire 位置**，不是**几何点**：
+
+- 一次裁剪会沿接触线把边界边劈开，而 `propagate_split` 会把这个劈分同步到**所有**引用该边的 wire —— 包括還没轮到自己被裁剪的邻面。
+- 于是邻面边界上多了若干个顶点。轮到裁剪该邻面时，接触线的端点正好落在这些顶点上，而每个顶点被两条相邻子边各上报一次 → 一个几何点产生 2 个 hit，两端就是 4 个 → `hits.len() != 2`。
+
+结果不是「裁错了」，而是**整面拒绝裁剪**：面保持原始尺寸，圆角面叠在原实体外侧，`fillet_builder` 只打一条 `log::warn!` 就继续。
+
+实测证据（`10³` 立方体，12 条棱，`r=1`，日志 `RUST_LOG=warn`）：
+
+```text
+trimming failed on face Id(4): trimming failure ...   ← x = 10 面，4 条棱全失败
+trimming failed on face Id(5): trimming failure ...   ← x =  0 面，4 条棱全失败
+faces = 26
+  [3] Plane wires=1 oe=9 bbox=[10,10] x [0,10] x [0,10]   ← 未裁剪，原始尺寸
+  [4] Plane wires=1 oe=9 bbox=[ 0, 0] x [0,10] x [0,10]   ← 未裁剪，原始尺寸
+  其余 4 个 Plane 均 [1,9] x [1,9]                        ← 已裁剪
+```
+
+这也解释了偏差为什么随 `r` 增长：未被裁剪的面在 `r` 小时只有 1 个（`r=0.1`），随 `r` 增大升到 4 个（`r>=0.5`）。
+
+### 修复
+
+`crates/blend/src/trimmer.rs`：
+
+1. `dedup_crossings` —— 收集完 hit 后按 3D 距离（`SNAP_TOL = 1e-7`）合并重复点，只按**不同几何点**判断能否裁剪。
+2. `split_at_crossing` —— 交点落在端点上时**吸附到已有顶点**，不新建顶点、不切分；`pre` / `post` 两个 run 允许为 `None`（切割点落在边起点时整条边归属 post 侧，落在终点时归属 pre 侧）。否则会造出零长度子边和一个与原顶点相差一个舍入单位的重复顶点。
+3. chain 组装改为 `Option` 拼接；「保留哪一侧」的采样从「固定的下一条边起点」改为「遍历整条 chain 取距接触线最远的点」——原来的固定采样在接触点吸附到顶点时正好落在直线上，叉积归零，左右判断取决于舍入方向。
+
+### 修复前后
+
+| r | 闭式解 | 修复前 | 修复后 | 剩余偏差 |
+|---|---|---|---|---|
+| 0.1 | 999.744 | 1013.360 | 通过与闭式解一致 | — |
+| 0.5 | 993.729 | 1067.234 | 1004.164 | +10.435 |
+| 1.0 | 975.587 | 1135.340 | 1016.300 | +40.713 |
+| 2.0 | 907.705 | 1272.878 | 1063.202 | +155.497 |
+
+6 个平面面现在**全部**被裁剪到 `[r, L-r]²`。
+
+### 剩余：stripe 没有 setback（未修复）
+
+剩下的偏差 ∝ r²，且结果壳仍非流形（`validate_shell_closed` 报有自由边）。原因是每条圆角条带覆盖整条棱长 `L`（此处 10），而正确的轴向长度是 `L - 2r`（此处 8）——条带必须在距每个顶点 `r` 处终止，由角球面接手。`corner::compute_corners` 已经产出 8 个角球面，但没有把条带两端裁回来与它拼上。
+
+这正是本文开头说的「corner trimmer 一侧」，与本轮修复是两个独立的缺陷。它被留作 `fillet_box_volume.rs` 中两条 `#[ignore]` 的 ticket（`cargo test -- --ignored` 可见）。
+
+### 回归
+
+`cargo test -p brepkit-blend` 97 项通过（含新增 `trim_through_an_existing_boundary_vertex`）；`cargo test -p brepkit-operations` 见提交记录。
+
+两条 ticket 均经过反向验证：临时停用 `dedup_crossings` 后，单元测试报 `TrimmingFailure { face: Id(1) }`，端到端测试报「`r=0.1` 有 1 个面未被裁剪、`r>=0.5` 有 4 个」，与修复前的现象一致。
