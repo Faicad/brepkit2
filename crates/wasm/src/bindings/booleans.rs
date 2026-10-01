@@ -255,6 +255,24 @@ impl BrepKernel {
             brepkit_operations::mesh_boolean::mesh_boolean(&mesh_a, &mesh_b, bool_op, tolerance)?;
         Ok(triangle_mesh_to_js(&result.mesh))
     }
+
+    /// How many boolean operations have degraded to the mesh (co-refinement)
+    /// fallback since this page/tab started.
+    ///
+    /// A mesh fallback still returns a usable solid, but it destroys every
+    /// analytic surface type in the result — planes become triangle soups,
+    /// cylinders and tori disappear, and face counts jump by orders of
+    /// magnitude. Read this before and after a batch of booleans: a non-zero
+    /// delta means at least one operation silently lost precision.
+    ///
+    /// The counter is process-global (shared by every `BrepKernel` in the
+    /// module), so read deltas rather than absolute values.
+    #[must_use]
+    #[wasm_bindgen(js_name = "meshFallbackCount")]
+    #[allow(clippy::unused_self)]
+    pub fn mesh_fallback_count(&self) -> u64 {
+        brepkit_operations::boolean::mesh_fallback_count()
+    }
 }
 
 // Separate impl block: `compound_cut` uses manual `catch_unwind` for panic

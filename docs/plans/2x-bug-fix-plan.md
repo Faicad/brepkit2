@@ -120,6 +120,65 @@
 
 ---
 
+## 0'''. 第三轮实施记录（Phase 0.3 可观测性 + C 域复现）
+
+### 0'''.1 已修复：B-06 布尔降级无观测（Phase 0.3 落地）
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `crates/operations/tests/boolean_mesh_fallback_counter.rs` —— 引用 `mesh_fallback_count` 时编译失败（`no mesh_fallback_count in boolean`），证明 `crates/` 下没有任何 API 能观测到布尔降级 |
+| 修复 | `crates/operations/src/boolean/mod.rs` 新增进程级 `AtomicU64` 计数器；在 `mesh_boolean_fallback` **入口**自增（计数的是「GFA 无法解析服务这次布尔」这一事件，与该次 fallback 自身是否随后成功无关）；导出 `mesh_fallback_count()` / `reset_mesh_fallback_count()` |
+| WASM | `crates/wasm/src/bindings/booleans.rs` 新增 `BrepKernel::meshFallbackCount()` |
+| 测试 | 三段断言：① 对照（两 box 解析 fuse，体积解析值 1091 = 1000+216−5³）计数 delta = 0；② 主用例（正交圆柱 fuse）计数 = 1；③ delta 式读取再验证 |
+| 断言 vs 实现 | 计数器是可观测性基础设施，不改变任何几何输出 |
+
+**该计数器首次使用即给出 A 域的实测基线**（本轮扫描，`fallback=1` 表示该布尔走了 mesh 降级）：
+
+| 场景 | fallback |
+|------|---------|
+| 两 box fuse / slab 切盲孔（#696 夹具）/ 圆锥切圆柱 / 多刀具顺序切 / 共面 box fuse | **0**（解析路径） |
+| 正交圆柱 fuse、torus ∩ box、torus ∪ box、sphere − box、64 段 sphere − sphere / − 倾斜 box | **1** |
+
+即 A 域的度量尺已就位，且立即指出「曲面×曲面」「曲面×平面」的解析交线仍有一批走 mesh 降级 —— 这是 Phase 2 的排序入口。
+
+### 0'''.2 未复现 → 跳过：C-03（面片翻转/法向朝内）
+
+结论：**本 fork 的 fillet 结果几何定向正确，C-03 不复现**。判定用了两条互相独立的证据：
+
+1. **解析法向 + 凸体判据。** 对 10³ box 全 12 棱圆角（r=1/2.5/4）的结果，逐面取解析曲面法向、施加 `is_reversed`，再与「面点 − 体中心」作点积：18 个解析可判定面（6 平面 + 12 圆柱）**全部朝外**，0 个朝内（剩余 8 个角面为 NURBS，判据不覆盖）。
+2. **体积。** r=1 结果 975.332，与「1000 − 12 条棱圆角去除 + 8 个角部」的解析预期 ≈975.6 一致；若真有大面积翻面，发散积分必然偏离。
+
+过程中的**两次假信号**（记录以免后续重踩）：
+
+- **tessellate 三角形绕向不能当定向判据。** 用「三角形绕向法向 + 沿法向偏移 1e-4 探测内/外」判定时，圆柱面与角面被集中误判为「朝内」（18/26）。根因是偏移步长 1e-4 小于曲面离散的弦深，探测点仍落在实体内部。同一误判在**未圆角的圆柱基元**上同样出现（侧面恒报 1 个），这正是「先建对照用例」纪律要拦下的东西。
+- **`check_shell_orientation` 报「24 条共享边同向使用」。** 经逐边分类确认为真·两个不同面同向（`sameFaceDup=0`），即 fillet 结果里 wire 边的 `is_forward` 记录与面相向不自洽。但解析法向与体积双双证明几何朝向无误，且既有 `try_fillet_second_pass_does_not_break_solid` 等下游测试未受影响 —— 因此判为**拓扑标记层面的不一致，无几何后果**，本轮不改（改动会触及 fillet 引擎的面/wire 生成，收益不明而风险大）。
+
+顺带否定一条替代方案：`operations::heal::fix_face_orientations` 对本场景**无效**（`flipped=0`）。它只处理平面面、且靠改 `FaceSurface::Plane` 的 `normal/d` 来翻转，对圆柱/圆锥/球面显式跳过；而实验表明用 BFS 强行翻转 `is_reversed` 反而把体积从正确的 975 改成错误的 775 —— **这两种"修复"都不能用**。
+
+### 0'''.3 本轮未复现 / 无法测的其余 C 域条目
+
+| ID | 检查过程 | 结论 |
+|----|---------|------|
+| C-01 | box 10³ 全 12 棱：r=1 → 975.332、r=2.5 → 856.175、r=4 → 658.177，均 `closed=true` 且无过度去除迹象；既有 `try_fillet_all_box_edges_no_corner_over_removal` 亦通过 | **未复现**。但发现一条**待查线索**：`5×5×20` box 全棱 r=2.5（圆角半径 = 短边一半，12 条棱的圆角两两相切）只产出 **8 个面**，而非标准 26 —— 疑为退化情形下的降级结果，下一轮优先复现 |
+| C-02 | 混合半径需要逐棱不同半径的入口，`try_fillet` 只有单一 `radius` 参数 | **无法测**，需先补逐棱半径 API |
+| C-03 | 见 0'''.2 | **未复现 → 跳过** |
+
+### 0'''.4 验证闭环记录（B-06）
+
+出现过一次临时阻塞：C: 盘一度 100% 占满（余 33M），`cargo` 链接阶段写 PDB 失败（LNK1201）。清理 `target/debug/incremental`（11G）后恢复，验证已全部跑完：
+
+| 验证项 | 结果 |
+|--------|------|
+| `cargo test -p brepkit-operations --test boolean_mesh_fallback_counter` | ✅ 1 passed（对照 + 主用例 + delta 读取） |
+| `cargo test -p brepkit-operations --doc` | ✅ 1 passed（`mesh_fallback_count` 文档示例） |
+| `cargo clippy -p brepkit-operations -p brepkit-wasm --all-targets` | ✅ 无 error / 无 warning |
+| `scripts/check-boundaries.sh` | ✅ All crate boundaries valid |
+| `cargo check -p brepkit-wasm --lib` | ✅ 通过（`meshFallbackCount` 绑定编译无误） |
+
+注：C 域（C-01/C-02/C-03）本轮**只做复现探查、未改任何代码**，故无对应回归项。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -166,16 +225,16 @@
 | B-03 | 混合装配保留亚分辨率多边形（碎屑面） | 待复现 |
 | B-04 | shell 腔面 sense 端到端错误：`shell_op` 产出的空盒出现一批同 sense 边 | **待复现**（`shell_op.rs` 已有 `is_reversed` 处理，但 sense 一致性未见端到端校验） |
 | B-05 | rim 未从排序后的边界边装配 | 待复现 |
-| B-06 | 布尔结果缺少"退化到 mesh fallback"的可观测计数 | **已确认**：`crates/` 下无 `mesh_fallback` 计数器（可观测性缺口，非崩溃缺陷） |
+| B-06 | 布尔结果缺少"退化到 mesh fallback"的可观测计数 | **已修复**（第三轮，见 §0'''.1）：`boolean::mesh_fallback_count()` + WASM `meshFallbackCount()` |
 | B-07 | 布尔后同面碎片未合并 | **疑似已修**：`BooleanOptions::unify_faces` 已存在，需确认生效路径 |
 
 ### C. 圆角 / 倒角（crates/blend + operations/fillet + wasm）
 
 | ID | 2.x 症状 | 本仓库状态 |
 |----|---------|-----------|
-| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **疑似部分缓解**：`wasm/src/helpers.rs::try_fillet` 已有 closed-manifold 门禁 + 多引擎回退，并有 `try_fillet_all_box_edges_no_corner_over_removal` 测试 |
-| C-02 | 混合半径角部开缝 | 待复现 |
-| C-03 | 面片翻转（法向朝内） | 待复现 |
+| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **未复现**（第三轮）：10³ box 全棱 r=1/2.5/4 体积 975.3/856.2/658.2 均合理且封闭。**待查线索**：`5×5×20` box 全棱 r=2.5（圆角两两相切）只出 8 个面 |
+| C-02 | 混合半径角部开缝 | **无法测**：`try_fillet` 只有单一 `radius`，缺逐棱半径入口 |
+| C-03 | 面片翻转（法向朝内） | **未复现 → 跳过**（第三轮，见 §0'''.2）：解析法向 0/18 朝内 + 体积 975.3 对解析 ≈975.6 |
 | C-04 | 三面角 setback 判定错误 | 待复现 |
 | C-05 | 等半径相邻圆角的尖角斜接角错误 | 待复现 |
 | C-06 | trimmer 缺少分裂守卫 | 待复现 |
@@ -257,7 +316,7 @@
 |------|------|
 | 0.1 | 为 A/B/C/E/F/G 各域搭建**最小复现脚手架**：从基元（box / cylinder / cone / torus / 带孔板）构造输入，打印体积、面数、bbox、封闭性 |
 | 0.2 | 建立统一几何不变量校验入口（复用 `topology::validation::validate_shell_closed`，补：Euler 数、体积符号、法向朝外一致性、边被两面共享） |
-| 0.3 | 给布尔加**进程级 mesh-fallback 计数器**（`AtomicU64` + `pub fn mesh_fallback_count()`，WASM 侧暴露），作为 A 域修复的度量尺 |
+| 0.3 | ✅**已完成**（见 §0'''.1）：布尔进程级 mesh-fallback 计数器（`AtomicU64` + `pub fn mesh_fallback_count()`，WASM 侧 `meshFallbackCount()`），作为 A 域修复的度量尺 |
 | 0.4 | 把"已确认"的 6 条（D-01 / E-03 / E-05 / F-01 / F-02 / C-09）写成失败测试，锁定基线 |
 
 ### Phase 1 — P0：会产出错误几何/错误数值的缺陷

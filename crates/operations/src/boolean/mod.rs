@@ -33,6 +33,56 @@ use brepkit_topology::edge::EdgeCurve;
 use brepkit_topology::face::{FaceId, FaceSurface};
 use brepkit_topology::solid::SolidId;
 
+/// Number of boolean operations that have degraded to the mesh
+/// (co-refinement) fallback since the process started.
+///
+/// Incremented once per entry into [`mesh_boolean_fallback`] — i.e. once per
+/// boolean that GFA could not serve analytically.
+static MESH_FALLBACK_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many boolean operations have fallen back to the mesh (co-refinement)
+/// path because GFA could not produce a usable analytic result.
+///
+/// The mesh fallback works, but it destroys every analytic surface type in
+/// the result: planes become triangle soups, cylinders and tori disappear,
+/// and face counts explode by orders of magnitude. It is therefore the single
+/// most useful quality signal for the GFA engine — a caller that sees this
+/// number climb knows its model silently lost precision.
+///
+/// Process-global and monotonically increasing; read it before and after a
+/// batch of booleans and compare. WASM callers can read it through
+/// `BrepKernel::meshFallbackCount`.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use brepkit_topology::Topology;
+/// # let mut topo = Topology::new();
+/// let before = brepkit_operations::boolean::mesh_fallback_count();
+/// # let a = brepkit_operations::primitives::make_box(&mut topo, 1.0, 1.0, 1.0).unwrap();
+/// # let b = brepkit_operations::primitives::make_box(&mut topo, 1.0, 1.0, 1.0).unwrap();
+/// let _ = brepkit_operations::boolean::boolean(
+///     &mut topo,
+///     brepkit_operations::boolean::BooleanOp::Fuse,
+///     a,
+///     b,
+/// );
+/// let degraded = brepkit_operations::boolean::mesh_fallback_count() > before;
+/// ```
+#[must_use]
+pub fn mesh_fallback_count() -> u64 {
+    MESH_FALLBACK_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Reset the mesh-fallback counter to zero.
+///
+/// Test isolation helper: the counter is process-global, so a test that
+/// asserts on it must reset first. Prefer asserting on a *delta* rather than
+/// an absolute value when other booleans may run concurrently.
+pub fn reset_mesh_fallback_count() {
+    MESH_FALLBACK_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Perform a boolean operation on two solids.
 ///
 /// Uses the GFA pipeline as the primary engine, with mesh boolean
@@ -2361,6 +2411,12 @@ fn mesh_boolean_fallback(
     tol: brepkit_math::tolerance::Tolerance,
     opts: &BooleanOptions,
 ) -> Result<SolidId, crate::OperationsError> {
+    // Count every degradation: this is the measurement stick for GFA
+    // quality (see `mesh_fallback_count`). Counted on ENTRY, not on success,
+    // because "GFA could not serve this boolean" is the signal — a fallback
+    // that then errors still tells the caller the analytic path failed.
+    MESH_FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     // Mesh density here is a boolean-robustness concern, independent of the
     // rendering tolerance: use the linear-only criterion (angular_tol 0.0) so
     // the face count is unaffected by the display deflection cap, AND keep the
