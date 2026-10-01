@@ -111,7 +111,8 @@ map(|sh| brepkit_topology::validation::validate_shell_closed(sh, topo).is_ok())
 | `probe_cascade.rs` | 手写 `try_fillet` 三级级联，复刻 wasm 门禁 | `cascade_at_tangency` |
 | `probe_tangent_shape.rs` | 度量校准、`rolling_ball` 相切拒绝、`fillet_v2` 收敛标定 | `probe`、`probe_cube`、`probe_fillet_v2_slab` |
 | `regress_fillet_tangent_edges.rs` | 每引擎落点 + 解析曲面普查 | `tangent_short_edges_produce_the_capsule`、`fillet_v2_over_sweeps_a_box` |
-| `regress_fillet_mixed_radius.rs` | C-02：混合半径 / 逐棱半径圆角是否还水密 | `mixed_radius_fillets_stay_watertight` |
+
+C 域的 C-02（逐棱半径圆角产自由边）另有独立留档：`docs/analysis/2026-10-01-fillet-variable-free-edges.md`。该文件同样是 `regress_fillet_cascade/` 目录的成员，只是本 bug 的记录归它自己一条，不并入本文。
 
 七个用例全部 `#[ignore]`d，因为 bug 未修：默认套件保持全绿，`-- --ignored` 把七个票面全部亮出来，红点即待办断言（修好引擎后断言自行转绿，不需要改测试代码）。
 
