@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790771753181,
+  "lastUpdate": 1790822173358,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -539,6 +539,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24901235,
             "range": "± 50190",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "b4893347f622ec43e1e0127b77f8a69395a49994",
+          "message": "docs(i18n): expand terminology glossary with per-area term tables",
+          "timestamp": "2026-10-01T10:33:36+08:00",
+          "tree_id": "528216e44b0c3bd0813bdf5e2523c94f6539a822",
+          "url": "https://github.com/Faicad/brepkit2/commit/b4893347f622ec43e1e0127b77f8a69395a49994"
+        },
+        "date": 1790822172481,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 963512,
+            "range": "± 2100",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1044112,
+            "range": "± 3714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11959,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 700764,
+            "range": "± 3354",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24947819,
+            "range": "± 196765",
             "unit": "ns/iter"
           }
         ]
