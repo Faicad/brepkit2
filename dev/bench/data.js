@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790933131926,
+  "lastUpdate": 1790934855901,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -701,6 +701,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24821336,
             "range": "± 138079",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "b0928173ce9fceeec2bccde9cade8fb407af518b",
+          "message": "fix(shell): register cavity faces as an inner shell and classify through it (B-04)\n\n- shell() closed path put the 6 outer faces and 6 cavity faces into a\n  single disconnected shell and never registered an inner shell. Split\n  connected components via face_components: largest stays the outer\n  shell, the rest are registered as cavity (inner) shells.\n- classify_point / compute_winding_number only traversed the outer\n  shell, so a cavity center classified Inside once cavity faces moved\n  to the inner shell. Face set is now outer + inner shells; ray parity\n  gives the correct sign automatically.\n- visibility of face_components widened pub(super) -> pub(crate).\n- add regression tests: sense/connectivity check with a plain-box\n  control case, and cavity/wall point classification for both closed\n  and open-top variants. Plan doc updated with the round record.",
+          "timestamp": "2026-10-02T17:48:24+08:00",
+          "tree_id": "b37e47a8c25abf58508080ffb360ed6978b3a542",
+          "url": "https://github.com/Faicad/brepkit2/commit/b0928173ce9fceeec2bccde9cade8fb407af518b"
+        },
+        "date": 1790934855447,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 519646,
+            "range": "± 5431",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 578068,
+            "range": "± 10271",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 7286,
+            "range": "± 136",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 386389,
+            "range": "± 5645",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 15341257,
+            "range": "± 295577",
             "unit": "ns/iter"
           }
         ]
