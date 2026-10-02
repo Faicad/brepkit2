@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790934855901,
+  "lastUpdate": 1790983165377,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -755,6 +755,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 15341257,
             "range": "± 295577",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "e3fc3f0b910560b7193082df9b781a86b71f2c89",
+          "message": "feat(io,ci): fix cone STEP semi-angle and add OCCT cross-kernel compat gate\n\n- STEP writer now emits CONICAL_SURFACE semi-angle measured from the\n  axis (ISO 10303); the reader converts it back to the internal\n  radial-plane definition. Fixes OCCT misreading cone volume\n  (1651.0 instead of 612.6) found by the faijs cross-kernel probe.\n- Add scripts/compare-occt.mjs: builds 10 reference solids in both\n  brepkit2 (local wasm build) and occt-wasm, exports STEP from each,\n  and gates on volume/area/bbox/surface-census agreement plus OCCT\n  reading brepkit2 STEP back with matching volume. Sphere topology\n  difference (two hemispheres vs seam) is a documented exemption.\n- New kernel-compat CI job on main pushes and a weekly schedule;\n  occt-wasm is installed ad hoc inside the job and is not a project\n  dependency.",
+          "timestamp": "2026-10-03T07:17:26+08:00",
+          "tree_id": "3aa4a4db36b67d3b71adb55f273f2df1767f0ff4",
+          "url": "https://github.com/Faicad/brepkit2/commit/e3fc3f0b910560b7193082df9b781a86b71f2c89"
+        },
+        "date": 1790983164460,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 527098,
+            "range": "± 6852",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 587617,
+            "range": "± 15874",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 7258,
+            "range": "± 90",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 384131,
+            "range": "± 5170",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 15251132,
+            "range": "± 247178",
             "unit": "ns/iter"
           }
         ]
