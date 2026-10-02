@@ -40,8 +40,12 @@ fn shell_closed_box() {
     let s = topo.solid(result).unwrap();
     let sh = topo.shell(s.outer_shell()).unwrap();
 
-    // 6 outer + 6 inner = 12 faces (no rim faces since no openings).
-    assert_eq!(sh.faces().len(), 12, "closed shell should have 12 faces");
+    // Outer shell has the 6 exterior faces; the 6 cavity faces live in an
+    // inner shell (the void is a separate, disjoint face group).
+    assert_eq!(sh.faces().len(), 6, "outer shell should have 6 faces");
+    assert_eq!(s.inner_shells().len(), 1, "cavity must be an inner shell");
+    let cavity = topo.shell(s.inner_shells()[0]).unwrap();
+    assert_eq!(cavity.faces().len(), 6, "cavity shell should have 6 faces");
 }
 
 #[test]
@@ -1000,4 +1004,88 @@ fn shell_thickness_past_corner_radius_gives_a_sharp_corner() {
         diagonal_planes, 4,
         "each swallowed corner cylinder must leave a 45-degree chamfer strip"
     );
+}
+
+/// B-04: every edge of a closed shell must be used once forward and once
+/// reversed (sense consistency). Covers the outer shell AND the cavity shell
+/// produced by `shell()` with no open faces.
+#[test]
+fn shell_closed_box_sense_consistent_outer_and_cavity() {
+    let mut topo = Topology::new();
+    let cube = make_unit_cube_manifold(&mut topo);
+
+    let result = shell(&mut topo, cube, 0.1, &[]).unwrap();
+    let s = topo.solid(result).unwrap();
+
+    // NOTE: shell() currently puts all 12 faces (6 outer + 6 cavity) into a
+    // SINGLE shell — it never creates an inner shell. That is part of the
+    // B-04 problem statement; the sense check below covers whatever layout
+    // the operation produces.
+    let shell_ids: Vec<_> = std::iter::once(s.outer_shell())
+        .chain(s.inner_shells().iter().copied())
+        .collect();
+
+    for shell_id in shell_ids {
+        let issues =
+            brepkit_check::validate::shell::check_shell_orientation(&topo, shell_id).unwrap();
+        assert!(
+            issues.is_empty(),
+            "shell orientation inconsistent: {issues:?}"
+        );
+        // A shelled solid's shell must be CONNECTED (outer wall and cavity
+        // wall are joined through the topology assembly). A disconnected
+        // shell silently breaks adjacency-based downstream code.
+        let conn = brepkit_check::validate::shell::check_shell_connected(&topo, shell_id).unwrap();
+        assert!(conn.is_empty(), "shell disconnected: {conn:?}");
+    }
+}
+
+/// B-04 control case: an untouched box must pass the same sense check, proving
+/// the checker itself works before it is aimed at the shelled result.
+#[test]
+fn control_plain_box_sense_consistent() {
+    let mut topo = Topology::new();
+    let cube = make_unit_cube_manifold(&mut topo);
+    let s = topo.solid(cube).unwrap();
+    let issues =
+        brepkit_check::validate::shell::check_shell_orientation(&topo, s.outer_shell()).unwrap();
+    assert!(issues.is_empty(), "plain box must have consistent sense");
+}
+
+/// B-04: the cavity of a shelled box must classify as Outside, and the wall
+/// material as Inside — checked on both open and closed shell variants.
+#[test]
+fn shell_cavity_point_classification() {
+    use crate::classify::{PointClassification, classify_point};
+
+    for open in [false, true] {
+        let mut topo = Topology::new();
+        let cube = make_unit_cube_manifold(&mut topo);
+        let open_faces = if open {
+            find_faces_by_normal(&topo, cube, Vec3::new(0.0, 0.0, 1.0))
+        } else {
+            vec![]
+        };
+        let result = shell(&mut topo, cube, 0.1, &open_faces).unwrap();
+
+        // Cavity center of the closed variant: (0.5,0.5,0.5) inside the void.
+        // For the open-top variant the void is open at the top; probe a point
+        // still inside the void region under the opening.
+        let cavity_pt = brepkit_math::vec::Point3::new(0.5, 0.5, if open { 0.5 } else { 0.5 });
+        let cls = classify_point(&topo, result, cavity_pt, 0.01, 1e-6).unwrap();
+        assert_eq!(
+            cls,
+            PointClassification::Outside,
+            "open={open}: cavity center must classify Outside, got {cls:?}"
+        );
+
+        // Control: a point inside the wall material (bottom wall, z=0.05).
+        let wall_pt = brepkit_math::vec::Point3::new(0.5, 0.5, 0.05);
+        let cls_w = classify_point(&topo, result, wall_pt, 0.01, 1e-6).unwrap();
+        assert_eq!(
+            cls_w,
+            PointClassification::Inside,
+            "open={open}: wall material point must classify Inside, got {cls_w:?}"
+        );
+    }
 }

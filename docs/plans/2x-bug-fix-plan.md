@@ -307,6 +307,33 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 ---
 
+## 0''''''. 第七轮实施记录（B-04：shell 腔面 sense / 拓扑归档）
+
+### 0'''''.1 结果：已修复（两个独立缺陷）
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `shell_op/tests.rs::shell_closed_box_sense_consistent_outer_and_cavity` —— closed `shell()` 结果的 12 个面被 `check_shell_connected` 判为 **7 个连通分量（6/12 可达）**；对照用例 `control_plain_box_sense_consistent` 通过，证明校验器本身无误 |
+| 缺陷一（主） | `shell()` 无开面路径（`boundary_edge_ids.is_empty()`）把外壳 6 面 + 腔面 6 面全部塞进**同一个 shell**，且 `Solid` 未登记任何 inner shell。外墙面与腔面不共享任何边（外/腔不接触），因此该 shell 天然不连通 —— 诊断打印确认 24 条边每条恰好被 2 个面使用（封闭、sense 一致），分裂纯粹是"两个不相交面组共享一个 shell"造成 |
+| 修复一 | `shell_op.rs` closed 路径改用 `face_components`（可见性 `pub(super)` → `pub(crate)`）拆分连通分量：最大分量留作 outer shell，其余登记为 inner shell（腔壳） |
+| 缺陷二（连带暴露） | `operations/classify.rs` 的 `classify_point` 与 `compute_winding_number` 只遍历 `outer_shell` —— 修复一之后腔面被移入 inner shell，空腔中心被误判 Inside。面集合改为 `once(outer_shell).chain(inner_shells)`；穿越奇偶性自动给出正确符号，无需翻转 |
+| 旧断言更新 | `shell_closed_box` 由"12 面全在 outer shell"改为"outer 6 面 + 1 个 inner shell 6 面"；`shell_cavity_point_classification` 新增 closed + open 两形态的腔心=Outside / 壁材=Inside 双断言 |
+| 反向验证 | 修复前主用例红（7 连通分量 / 腔心 Inside），修复后绿；对照用例全程绿 |
+
+### 0'''''.2 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| `cargo test -p brepkit-operations` | 812 库测试 + 全部集成测试通过（含新增 4 条：主用例、对照、腔点分类、sense 复验） |
+| `cargo clippy -p brepkit-operations -p brepkit-check --all-targets` | 零告警 |
+| `scripts/check-boundaries.sh` | 通过（经 Git Bash 执行；PATH 上的 STM32 工具链旧版 bash 不支持 `local arr=("$@")` 数组语法，与代码无关） |
+
+改动文件：`crates/operations/src/shell_op.rs`、`crates/operations/src/classify.rs`、`crates/operations/src/boolean/assembly.rs`（仅可见性）、`crates/operations/src/shell_op/tests.rs`。
+
+注：诊断用临时测试 `diag_shell_connectivity` 已删除。B-04 中"open-top 形态的 rim sense"未单独构造出失败信号（open 路径 rim 面方向取自被移除面的外法向，closed/open 两形态的腔点分类断言均绿），open-top 的 sense 端到端校验由 `shell_cavity_point_classification` 覆盖。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -351,7 +378,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 | B-01 | compound-cut 对 contact-thin 工具未走单 arrangement，性能差 | 待复现 |
 | B-02 | 被 fallback 污染的 cluster fuse 仍参与 batching | 待复现 |
 | B-03 | 混合装配保留亚分辨率多边形（碎屑面） | 待复现 |
-| B-04 | shell 腔面 sense 端到端错误：`shell_op` 产出的空盒出现一批同 sense 边 | **待复现**（`shell_op.rs` 已有 `is_reversed` 处理，但 sense 一致性未见端到端校验） |
+| B-04 | shell 腔面 sense 端到端错误：`shell_op` 产出的空盒出现一批同 sense 边 | **已修复**（第七轮，见 §0''''''）：closed 路径外/腔两组面挤在同一 shell 且未登记 inner shell（12 面 7 连通分量）；腔面移入 inner shell 后连带暴露并修复 `classify_point`/`compute_winding_number` 只遍历 outer shell 的问题。sense 本身经诊断 24 边全为成对正反使用，无同 sense 边 |
 | B-05 | rim 未从排序后的边界边装配 | 待复现 |
 | B-06 | 布尔结果缺少"退化到 mesh fallback"的可观测计数 | **已修复**（第三轮，见 §0'''.1）：`boolean::mesh_fallback_count()` + WASM `meshFallbackCount()` |
 | B-07 | 布尔后同面碎片未合并 | **疑似已修**：`BooleanOptions::unify_faces` 已存在，需确认生效路径 |

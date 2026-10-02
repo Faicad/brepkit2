@@ -502,6 +502,34 @@ pub fn shell(
 
     if boundary_edge_ids.is_empty() {
         // No open boundary — shell is already closed (no open faces, or all faces present).
+        // The outer walls and the cavity walls share NO edges (they are two
+        // disjoint face groups in one shell). Register the cavity groups as
+        // inner shells so the Solid models the void correctly and every
+        // shell stays a single connected component.
+        let components = crate::boolean::assembly::face_components(topo, solid);
+        if components.len() > 1 {
+            // The largest component is the exterior boundary; the rest are voids.
+            let (outer_idx, _) = components
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, group)| group.len())
+                .unwrap_or((0, &Vec::new()));
+            let outer_faces = components[outer_idx].clone();
+            let new_outer = brepkit_topology::shell::Shell::new(outer_faces)
+                .map_err(crate::OperationsError::Topology)?;
+            let old_outer = topo.solid(solid)?.outer_shell();
+            *topo.shell_mut(old_outer)? = new_outer;
+
+            for (ci, group) in components.iter().enumerate() {
+                if ci == outer_idx {
+                    continue;
+                }
+                let cavity_shell = brepkit_topology::shell::Shell::new(group.clone())
+                    .map_err(crate::OperationsError::Topology)?;
+                let cavity_id = topo.add_shell(cavity_shell);
+                topo.solid_mut(solid)?.add_inner_shell(cavity_id);
+            }
+        }
         return Ok(solid);
     }
 

@@ -72,9 +72,16 @@ pub fn classify_point(
     tolerance: f64,
 ) -> Result<PointClassification, OperationsError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
+    // Cavity shells (inner shells) are part of the boundary: a point inside a
+    // void must classify Outside. Ray parity handles the sign automatically —
+    // from a void the ray exits through the cavity shell, then the outer shell.
+    let face_ids: Vec<FaceId> = std::iter::once(solid_data.outer_shell())
+        .chain(solid_data.inner_shells().iter().copied())
+        .flat_map(|sid| topo.shell(sid).map(|sh| sh.faces().to_vec()))
+        .flatten()
+        .collect();
 
-    if is_on_boundary(topo, shell.faces(), point, tolerance)? {
+    if is_on_boundary(topo, &face_ids, point, tolerance)? {
         return Ok(PointClassification::OnBoundary);
     }
 
@@ -94,7 +101,7 @@ pub fn classify_point(
 
     let mut inside_votes = 0u32;
     for &dir in &ray_dirs {
-        let crossings = count_ray_crossings(topo, shell.faces(), point, dir, deflection)?;
+        let crossings = count_ray_crossings(topo, &face_ids, point, dir, deflection)?;
         if crossings % 2 == 1 {
             inside_votes += 1;
         }
@@ -743,15 +750,20 @@ fn compute_winding_number(
     tolerance: f64,
 ) -> Result<(f64, bool), OperationsError> {
     let solid_data = topo.solid(solid)?;
-    let shell = topo.shell(solid_data.outer_shell())?;
+    // Cavity shells are part of the boundary (see classify_point).
+    let face_ids: Vec<FaceId> = std::iter::once(solid_data.outer_shell())
+        .chain(solid_data.inner_shells().iter().copied())
+        .flat_map(|sid| topo.shell(sid).map(|sh| sh.faces().to_vec()))
+        .flatten()
+        .collect();
 
-    if is_on_boundary(topo, shell.faces(), point, tolerance)? {
+    if is_on_boundary(topo, &face_ids, point, tolerance)? {
         return Ok((0.0, true));
     }
 
     let direction = Vec3::new(1.0, 0.3, 0.1); // avoid axis-aligned rays
     let mut crossings = 0u32;
-    for &fid in shell.faces() {
+    for &fid in &face_ids {
         crossings += count_face_ray_crossings(topo, fid, point, direction, deflection)?;
     }
 
