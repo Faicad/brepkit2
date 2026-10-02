@@ -20,3 +20,37 @@ mod probe_cascade;
 mod probe_tangent_shape;
 mod regress_fillet_mixed_radius;
 mod regress_fillet_tangent_edges;
+
+/// Analytic volume of a box `lx x ly x lz` with all 12 edges filleted by `r`.
+///
+/// The filleted box is the neighbourhood of the inner offset core
+/// `K = (lx-2r) x (ly-2r) x (lz-2r)`; for a non-degenerate core Steiner's
+/// formula applies. Degenerates to a capsule when the core collapses.
+///
+/// This is the same closed form `tests/fillet_box_volume.rs` uses, and it was
+/// pinned down by two independent checks: the linear term cancels in the
+/// `r -> 0` expansion, and `fillet_rolling_ball` (a different solver)
+/// reproduces it across a radius sweep. That settles the earlier
+/// "three derivations disagreed (937.89 / 975.59 / 996.19)" worry — the
+/// cube value at `r = 1` is 975.587, not ~1000.
+pub(crate) fn analytic_box_fillet_volume(lx: f64, ly: f64, lz: f64, r: f64) -> f64 {
+    let (kx, ky, kz) = (lx - 2.0 * r, ly - 2.0 * r, lz - 2.0 * r);
+    if kx <= 0.0 || ky <= 0.0 || kz <= 0.0 {
+        // Core collapsed to a segment (or a point): the result is a capsule.
+        let axis = [kx, ky, kz].into_iter().filter(|v| *v > 0.0).count();
+        if axis == 1 {
+            let len = [kx, ky, kz].into_iter().find(|v| *v > 0.0).unwrap();
+            return std::f64::consts::PI * r * r * len
+                + (4.0 / 3.0) * std::f64::consts::PI * r * r * r;
+        }
+        return (4.0 / 3.0) * std::f64::consts::PI * r * r * r;
+    }
+    let v = kx * ky * kz;
+    let sa = 2.0 * (kx * ky + ky * kz + kx * kz);
+    let edges = 4.0 * (kx + ky + kz); // total core edge length
+    // Four planar core faces squeeze to: r*sa, plus 4 cylindrical bands of
+    // exterior dihedral angle pi/2.
+    let bands = r * r * (std::f64::consts::PI / 4.0) * edges;
+    let caps = r * r * r * 8.0 * (std::f64::consts::PI / 2.0) / 3.0;
+    v + r * sa + bands + caps
+}

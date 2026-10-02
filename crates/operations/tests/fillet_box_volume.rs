@@ -179,6 +179,69 @@ fn plane_face_extents(topo: &Topology, solid: brepkit_topology::solid::SolidId) 
     out
 }
 
+/// Axial extent of every cylindrical blend band, in spine-length units.
+///
+/// A box fillet turns each of its 12 edges into a quarter-cylinder running
+/// along that edge. Projecting the band's wire points onto the cylinder axis
+/// recovers how much of the edge the band covers: the whole edge, or only the
+/// part between the two corner patches.
+fn band_axial_extents(topo: &Topology, solid: brepkit_topology::solid::SolidId) -> Vec<f64> {
+    let mut out = Vec::new();
+    for fid in brepkit_topology::explorer::solid_faces(topo, solid).unwrap() {
+        let face = topo.face(fid).unwrap();
+        let brepkit_topology::face::FaceSurface::Cylinder(cyl) = face.surface() else {
+            continue;
+        };
+        let axis = cyl.axis();
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for wid in std::iter::once(face.outer_wire()).chain(face.inner_wires().iter().copied()) {
+            let wire = topo.wire(wid).unwrap();
+            for oe in wire.edges() {
+                let e = topo.edge(oe.edge()).unwrap();
+                for vid in [e.start(), e.end()] {
+                    let s = (topo.vertex(vid).unwrap().point() - cyl.origin()).dot(axis);
+                    lo = lo.min(s);
+                    hi = hi.max(s);
+                }
+            }
+        }
+        out.push(hi - lo);
+    }
+    out
+}
+
+#[test]
+fn every_blend_band_stops_one_radius_short_of_each_end() {
+    let mut offenders = Vec::new();
+    for &r in &RADII {
+        let mut topo = Topology::new();
+        let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
+        let result = walking(&mut topo, solid, r).unwrap();
+
+        let extents = band_axial_extents(&topo, result);
+        assert_eq!(extents.len(), 12, "a box fillet emits one band per edge");
+
+        // A band must give the spherical corner patch the whole radius at each
+        // end: running the full edge makes it overlap both its neighbours and
+        // the corner patch, adding material a fillet can only remove.
+        let expected = SIDE - 2.0 * r;
+        for (i, measured) in extents.iter().enumerate() {
+            if (measured - expected).abs() > 1e-6 {
+                offenders.push(format!(
+                    "fillet_v2 r={r}: band {i} covers {measured:.4} of the {SIDE} edge, \
+                     expected {expected:.4}"
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "every blend band must be set back by one radius at each corner:\n{}",
+        offenders.join("\n")
+    );
+}
+
 #[test]
 fn every_plane_face_shrinks_by_one_fillet_radius_per_side() {
     let mut offenders = Vec::new();
@@ -209,7 +272,6 @@ fn every_plane_face_shrinks_by_one_fillet_radius_per_side() {
 }
 
 #[test]
-#[ignore = "C-01 remainder: stripes are not set back at the corners, so the blend faces overrun"]
 fn walking_engine_box_fillet_matches_the_closed_form() {
     let failures = drift(walking, "fillet_v2");
     assert!(
@@ -219,23 +281,10 @@ fn walking_engine_box_fillet_matches_the_closed_form() {
     );
 }
 
-/// Trimming every contact line off every plane face is one bug fixed; the
-/// volume still overruns because each blend stripe runs the whole edge instead
-/// of stopping one radius short of each end, where the spherical corner patch
-/// takes over. See `docs/analysis/2026-10-01-wasm-fillet-cascade-bevel-fallback.md`
-/// for the trimmed-face investigation and the numbers below it left behind.
-///
-/// Measured at the time of writing (was `+159.75` at r=1 before the trimmer
-/// fix landed):
-///
-/// ```text
-///   r      expected     measured     delta
-///   0.5     993.729     1004.164    +10.435
-///   1.0     975.587     1016.300    +40.713
-///   2.0     907.705     1063.202   +155.497
-/// ```
+/// The cheapest statement of the same contract, with no closed form involved:
+/// filleting a convex solid removes material, so the result can never be
+/// larger than its input.
 #[test]
-#[ignore = "C-01 remainder: stripes are not set back at the corners, so the blend faces overrun"]
 fn box_fillet_never_adds_material() {
     let mut offenders = Vec::new();
     for &r in &RADII {

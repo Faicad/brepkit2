@@ -21,7 +21,9 @@ use brepkit_topology::wire::{OrientedEdge, Wire};
 
 use crate::BlendError;
 use crate::section::CircSection;
-use crate::spherical_triangle::{VertexContactData, build_n_edge_corner, build_spherical_corner};
+use crate::spherical_triangle::{
+    SphericalCornerResult, VertexContactData, build_n_edge_corner, build_spherical_corner,
+};
 use crate::stripe::Stripe;
 
 /// Classification of a vertex blend.
@@ -337,7 +339,18 @@ fn build_multi_edge_corner(
         let wire = Wire::new(oriented_edges, true)?;
         let wire_id = topo.add_wire(wire);
 
-        let face = Face::new(wire_id, Vec::new(), sr.surface.clone());
+        // The patch's control grid is built from the contact points in whatever
+        // rotational order the stripes happened to be collected in, so its
+        // natural normal may point into the material for some corners and out
+        // for others. Left uncorrected the blend faces contribute with the
+        // wrong sign and the solid measures far below its true volume; the
+        // face's `reversed` flag is what carries the fix (tessellation and the
+        // volume integral both follow it).
+        let face = if corner_patch_is_reversed(&sr) {
+            Face::new_reversed(wire_id, Vec::new(), sr.surface.clone())
+        } else {
+            Face::new(wire_id, Vec::new(), sr.surface.clone())
+        };
         let face_id = topo.add_face(face);
 
         results.push(CornerResult {
@@ -349,6 +362,42 @@ fn build_multi_edge_corner(
     }
 
     Ok(results)
+}
+
+/// Whether a corner patch's natural surface normal points into the material.
+///
+/// The patch lies on the rolling-ball sphere, so the outward direction is
+/// radial. Which way that runs is fixed by the same flag that decides where
+/// the centre sits in `compute_sphere_center`: `is_convex == false` selects
+/// `vertex - sum(normals) * r`, putting the ball centre *inside* the material,
+/// so outward means away from the centre. With `is_convex == true` the centre
+/// is out in the void and outward means towards it.
+fn corner_patch_is_reversed(sr: &SphericalCornerResult) -> bool {
+    const MID: f64 = 0.5;
+    const H: f64 = 1e-4;
+
+    let (Some(mid), Some(u_hi), Some(u_lo), Some(v_hi), Some(v_lo)) = (
+        sr.surface.evaluate(MID, MID),
+        sr.surface.evaluate(MID + H, MID),
+        sr.surface.evaluate(MID - H, MID),
+        sr.surface.evaluate(MID, MID + H),
+        sr.surface.evaluate(MID, MID - H),
+    ) else {
+        return false;
+    };
+
+    // The tessellator walks the patch as a (u, v) grid, so the winding of the
+    // triangles it emits follows du x dv — not `surface.normal`, whose
+    // convention is a property of the rational patch and can disagree with the
+    // grid order once the control grid is transposed.
+    let Ok(natural) = (u_hi - u_lo).cross(v_hi - v_lo).normalize() else {
+        return false;
+    };
+    let Ok(radial) = (mid - sr.sphere_center).normalize() else {
+        return false;
+    };
+    let outward = if sr.is_convex { -radial } else { radial };
+    natural.dot(outward) < 0.0
 }
 
 /// Build a simple triangular fill for 2 stripes meeting at a vertex.

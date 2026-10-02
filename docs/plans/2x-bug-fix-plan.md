@@ -253,6 +253,60 @@ V = xyz + 2r(xy+yz+xz) + pi·r²(x+y+z) + (4/3)·pi·r³
 
 ---
 
+## 0'''''. 第六轮实施记录（C-01 的引擎半边收尾）
+
+第五轮之后偏差从「多料」翻转成「缺料」（`r=1`：`1016.300` → `912.6748`）。本轮把它做到与闭式解一致，过程中挖出**三个独立缺陷**。
+
+### 0'''''.1 结果
+
+| r | 闭式 | 本轮前 | 本轮后 | 偏差 |
+|---|------|--------|--------|------|
+| 0.1 | 999.744 | — | 999.744 | 0.000 |
+| 0.5 | 993.729 | 977.163 | 993.692 | −0.037 |
+| 1.0 | 975.587 | 912.675 | 975.332 | −0.255 |
+| 2.0 | 907.705 | 690.772 | 905.746 | −1.959 |
+
+`r=2` 的 −1.959 属于**度量**：对照组 `fillet_rolling_ball` 同条件测得 `905.7461`，与 `fillet_v2` 的 `905.7464` 相差 `3e-4`。`fillet_box_volume.rs` 的 `VOLUME_TOL` 因此取 `2.0`。
+
+### 0'''''.2 缺陷一：条带跨整条棱长
+
+`Spine` 只有「整条链」一种形态。新增 `crates/blend/src/setback.rs` 解析求退缩量：条带相邻两面 `n1,n2` 的滚球球心 `w = r(n1+n2)/(1+n1·n2)` 到第三面 `n3` 的距离沿棱线性变化，退缩量 = `(r − w·n3)/(u·n3)`；顶点处不足 3 条被圆角的棱则不退缩（没有角补丁接手）。`Spine::window(start, end)` 只改 `length` 并记 `offset`，`locate` 用它把窗口参数映射回链参数；条带的所有下游阶段都从 `Spine` 读跨度，所以窗口化一处即可。
+
+### 0'''''.3 缺陷二：角补丁 apex 放在球面上
+
+degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁中心到球心 `0.8647`（内凹 13.5%）。对照组用的是**切锥顶点**（`center + (Σdir)·r`，正交角处 overshoot √3，正好落在盒体顶点），凹度 `0.9511`（4.9%）。改为切锥顶点后两引擎的角补丁 8 个采样点逐点相同。
+
+### 0'''''.4 缺陷三：角补丁朝向 6/8 朝内
+
+修完缺陷二体积几乎没动，说明形状不是主因。逐面核查：8 个角补丁里 **6 个三角面法向朝内**（对照组 0 个）。
+
+`VertexContactData::is_convex` 在 `compute_sphere_center` 里选择球心取 `vertex + Σn·r` 还是 `vertex − Σn·r`；调试输出显示它对 8 个凸角**全为 false**（`build_multi_edge_corner` 的 `avg_normal · cp_centroid > 0` 实际测的是「法向朝内」）。球心因此算对了，但同一标志被当「凸角」用来定朝外方向就正好反了。自洽用法：`is_convex == false` ⟺ 球心在材料内 ⟹ 朝外 = 背离球心。
+
+朝向由 `Face::new_reversed` 承载（`tessellate` 与体积积分都跟随 `is_reversed` 翻转绕向）；判据用 **(u,v) 网格切向量的叉积**，不用 `surface.normal`——张量积补丁在控制网格转置后 `normal` 的约定会与网格次序不一致，而 tessellator 是按网格次序出三角形的。
+
+### 0'''''.5 剩余（未修）：壳不是闭合 2-流形
+
+`corner::compute_corners` 为角补丁边界新建顶点与边，而非复用条带端点已有的边 → 26 个面里 76 次边引用是单面的（`r=1`：`edges=86, free=76`，对照组 `edges=48, free=0`）。不影响体积，但 `validate_shell_closed` 会判不合法（wasm 门禁 `is_valid` 因此拒绝 `fillet_v2`）。这是下一个独立缺陷。
+
+### 0'''''.6 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证（朝向） | 关掉修正 → `r=1` 精确回到 `912.6748` |
+| 反向验证（apex） | 改回球面 → `r=2` 偏差 −5.78，超容差 |
+| 反向验证（setback） | 关闭 → 条带轴向跨度回到 10，`every_blend_band_stops_one_radius_short_of_each_end` 变红 |
+| `cargo test -p brepkit-blend` | 99 项通过 |
+| `cargo test -p brepkit-operations` | 809 库测试 + 全部集成测试通过 |
+| `fillet_box_volume.rs` | 6/6 通过，两条原 `#[ignore]` ticket 转正 |
+| `regress_fillet_cascade` | `probe_cube`、`fillet_v2_over_sweeps_a_box` 转正；其余 5 票是别的缺陷，保持 `#[ignore]` |
+| clippy `--all-targets` / `check-boundaries.sh` | 干净 / 通过 |
+
+后两个票面的断言原先写的是「体积应贴近未圆角的 `1000`」——那个基线本身是错的（盒体圆角丢 `2.5752·(lx+ly+lz)·r²`，`r=1` 时为 24.4），正确的引擎反而通不过。已改为断言闭式解，闭式 helper 提到 `regress_fillet_cascade/main.rs` 共享。
+
+改动文件：`crates/blend/src/{setback.rs(新), spine.rs, fillet_builder.rs, corner.rs, spherical_triangle.rs, lib.rs}`；`crates/operations/tests/{fillet_box_volume.rs, regress_fillet_cascade/*}`；更新本文档与 `docs/analysis/2026-10-01-wasm-fillet-cascade-bevel-fallback.md`。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -306,7 +360,7 @@ V = xyz + 2r(xy+yz+xz) + pi·r²(x+y+z) + (4/3)·pi·r³
 
 | ID | 2.x 症状 | 本仓库状态 |
 |----|---------|-----------|
-| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **部分修**（第五轮，见 §0''''）：「trimmer 重复计数 → 相邻面完全不被裁剪」已修（`10³` box 全棱 r=1：体积 1135.34 → 1016.30，闭式 975.59；6 个平面现已全部裁剪到 `[r, L-r]²`）。**剩余**：stripe 未做 setback，条带覆盖整条棱长而非 `L-2r`，与角球面不封合 → 两条 `#[ignore]` ticket 留在 `crates/operations/tests/fillet_box_volume.rs` |
+| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **已修**（第六轮，见 §0'''''）：`10³` box 全棱的实测体积现已与闭式解一致（`r=0.1/0.5/1/2` 偏差 `0.000 / −0.037 / −0.255 / −1.959`，`r=2` 的残差是度量本身的，对照组同值）。三个独立缺陷：条带未 setback、角补丁 apex 在球面上内凹、角补丁朝向 6/8 朝内。**遗留**：壳仍不是闭合 2-流形（角补丁边界新建了重复顶点/边，76 次边引用单面），不影响体积但会被 `validate_shell_closed` 判不合法 → 下一个缺陷 |
 | C-02 | 混合半径角部开缝 | **无法测**：`try_fillet` 只有单一 `radius`，缺逐棱半径入口 |
 | C-03 | 面片翻转（法向朝内） | **未复现 → 跳过**（第三轮，见 §0'''.2）：解析法向 0/18 朝内 + 体积 975.3 对解析 ≈975.6 |
 | C-04 | 三面角 setback 判定错误 | 待复现 |

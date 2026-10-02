@@ -40,6 +40,11 @@ pub struct SphericalCornerResult {
     pub surface: FaceSurface,
     /// The 3 boundary arcs (great-circle arcs on the sphere).
     pub boundary_curves: Vec<NurbsCurve>,
+    /// Centre of the rolling-ball sphere carrying this patch.
+    pub sphere_center: Point3,
+    /// True when the corner is convex, i.e. the material is on the inside and
+    /// the outward face normal points away from `sphere_center`.
+    pub is_convex: bool,
 }
 
 /// Compute the sphere center and actual sphere radius from vertex
@@ -172,14 +177,21 @@ pub fn build_spherical_corner(
     let w_q2q3 = cos_half_angle(dir2, dir3);
     let w_q3q1 = cos_half_angle(dir3, dir1);
 
-    // Apex: projection of the centroid direction onto the sphere.
+    // Apex: the tangent-cone apex, i.e. the un-normalised sum of the unit
+    // radial directions, scaled by the sphere radius.
+    //
+    // Putting this control point *on* the sphere instead makes the
+    // degree-(2,2) patch sag inward across the middle of a wide triangle:
+    // sampled at (0.5, 0.5) it sits ~13% of R inside the sphere, gouging
+    // material out of the corner.  The un-normalised sum overshoots the
+    // sphere (by sqrt(3) for an orthogonal corner, landing exactly on the
+    // box corner) and pulls the rational blend back to within a few percent
+    // of R — the same construction the rolling-ball engine uses.
     let apex_dir_raw = dir1 + dir2 + dir3;
-    let apex_dir_len = apex_dir_raw.length();
-    if apex_dir_len < TOL {
+    if apex_dir_raw.length() < TOL {
         return Err(BlendError::CornerFailure { vertex: vid });
     }
-    let apex_dir = apex_dir_raw * (1.0 / apex_dir_len);
-    let apex = center + apex_dir * r;
+    let apex = center + apex_dir_raw * r;
 
     let w_apex = w_q1q2 * w_q2q3 * w_q3q1;
 
@@ -211,6 +223,8 @@ pub fn build_spherical_corner(
     Ok(SphericalCornerResult {
         surface: FaceSurface::Nurbs(surface),
         boundary_curves: vec![arc_q1q2, arc_q2q3, arc_q3q1],
+        sphere_center: center,
+        is_convex: data.is_convex,
     })
 }
 
@@ -257,7 +271,8 @@ pub fn build_n_edge_corner(
         let qi = data.contact_points[i];
         let qj = data.contact_points[j];
 
-        let result = build_triangle_on_sphere(center, r, qi, qj, centroid, data.vertex_id)?;
+        let result =
+            build_triangle_on_sphere(center, r, qi, qj, centroid, data.is_convex, data.vertex_id)?;
         results.push(result);
     }
 
@@ -271,6 +286,7 @@ fn build_triangle_on_sphere(
     q1: Point3,
     q2: Point3,
     q3: Point3,
+    is_convex: bool,
     vertex_id: VertexId,
 ) -> Result<SphericalCornerResult, BlendError> {
     let r = radius;
@@ -287,12 +303,13 @@ fn build_triangle_on_sphere(
     let w_q2q3 = cos_half_angle(dir2, dir3);
     let w_q3q1 = cos_half_angle(dir3, dir1);
 
+    // Apex: tangent-cone apex (un-normalised sum of unit radial directions);
+    // see `build_spherical_corner` for why it must not sit on the sphere.
     let apex_dir_raw = dir1 + dir2 + dir3;
-    let apex_dir_len = apex_dir_raw.length();
-    if apex_dir_len < TOL {
+    if apex_dir_raw.length() < TOL {
         return Err(BlendError::CornerFailure { vertex: vertex_id });
     }
-    let apex = center + apex_dir_raw * (r / apex_dir_len);
+    let apex = center + apex_dir_raw * r;
     let w_apex = w_q1q2 * w_q2q3 * w_q3q1;
 
     let control_points = vec![
@@ -318,6 +335,8 @@ fn build_triangle_on_sphere(
     Ok(SphericalCornerResult {
         surface: FaceSurface::Nurbs(surface),
         boundary_curves: vec![arc_q1q2, arc_q2q3, arc_q3q1],
+        sphere_center: center,
+        is_convex,
     })
 }
 
@@ -379,10 +398,12 @@ mod tests {
         let ny = Vec3::new(0.0, 1.0, 0.0);
         let nz = Vec3::new(0.0, 0.0, 1.0);
 
-        // Sphere center = origin + r * normalize(nx+ny+nz)
+        // Sphere center = origin + r * sum(normals). The sum is NOT normalised:
+        // offsetting by r along each face normal independently is what puts the
+        // centre at distance r from all three face planes, which for an
+        // orthogonal corner lands it r*sqrt(3) from the vertex.
         let normal_sum = nx + ny + nz;
-        let normal_dir = normal_sum * (1.0 / normal_sum.length());
-        let center = origin + normal_dir * r;
+        let center = origin + normal_sum * r;
 
         // Contact points: where the sphere touches each face plane.
         // Contact on face with normal n_i is C - r * n_i
@@ -436,22 +457,25 @@ mod tests {
         };
 
         let n_samples = 5;
+        let mut worst = 0.0_f64;
         for i in 0..=n_samples {
             for j in 0..=n_samples {
                 let u = i as f64 / n_samples as f64;
                 let v = j as f64 / n_samples as f64;
                 let pt = nurbs.evaluate(u, v);
                 let dist = (pt - center).length();
-                let err = (dist - r).abs();
-                // Rational quadratic on a sphere should be exact at corners
-                // and close elsewhere. Allow a modest tolerance for the
-                // degenerate-row approximation.
-                assert!(
-                    err < r * 0.15,
-                    "point at ({u},{v}) dist error {err} (dist={dist}, r={r})"
-                );
+                worst = worst.max((dist - r).abs());
             }
         }
+        // A degree-(2,2) rational patch cannot be an exact sphere away from its
+        // boundary arcs; the apex is deliberately pushed out to the tangent-cone
+        // apex so the patch tracks the sphere instead of sagging inside it. The
+        // bound is the deviation that leaves the corner contributing the right
+        // volume (see tests/fillet_box_volume.rs).
+        assert!(
+            worst < r * 0.06,
+            "patch must track the sphere; worst deviation {worst} of r={r}"
+        );
     }
 
     #[test]

@@ -21,6 +21,10 @@ pub struct Spine {
     params: Vec<f64>,
     /// Total arc length of the spine.
     length: f64,
+    /// Arc-length position, along the whole chain, at which this spine's own
+    /// parameter `s = 0` starts. Non-zero only for a windowed spine (see
+    /// [`Spine::window`]); the constructors below always start at 0.
+    offset: f64,
     /// Whether the chain forms a closed loop.
     is_closed: bool,
 }
@@ -46,6 +50,7 @@ impl Spine {
             edges: vec![edge_id],
             params: vec![0.0, length],
             length,
+            offset: 0.0,
             is_closed: false,
         })
     }
@@ -79,8 +84,30 @@ impl Spine {
             edges,
             params,
             length: cumulative,
+            offset: 0.0,
             is_closed,
         })
+    }
+
+    /// Restrict this spine to the sub-interval `[start, end]` of its own
+    /// arc-length parameter.
+    ///
+    /// Everything downstream keeps working unchanged — `length()`, `locate()`,
+    /// `evaluate()` and `tangent()` all reinterpret `s` relative to the window,
+    /// so a stripe built over a windowed spine is automatically a stripe that
+    /// spans only that part of the edge. Both bounds are clamped to the
+    /// spine's existing extent, so `window(0.0, self.length())` is a copy.
+    #[must_use]
+    pub fn window(&self, start: f64, end: f64) -> Self {
+        let lo = start.clamp(0.0, self.length);
+        let hi = end.clamp(lo, self.length);
+        Self {
+            edges: self.edges.clone(),
+            params: self.params.clone(),
+            length: hi - lo,
+            offset: self.offset + lo,
+            is_closed: self.is_closed && (hi - lo) >= self.length - f64::EPSILON,
+        }
     }
 
     /// Total arc length.
@@ -110,7 +137,8 @@ impl Spine {
     /// Map a global spine parameter `s in [0, length]` to `(edge_index, local_t in [0,1])`.
     #[must_use]
     pub fn locate(&self, s: f64) -> (usize, f64) {
-        let s_clamped = s.clamp(0.0, self.length);
+        let s_clamped =
+            (self.offset + s.clamp(0.0, self.length)).clamp(0.0, self.params[self.edges.len()]);
         for i in 0..self.edges.len() {
             let s0 = self.params[i];
             let s1 = self.params[i + 1];

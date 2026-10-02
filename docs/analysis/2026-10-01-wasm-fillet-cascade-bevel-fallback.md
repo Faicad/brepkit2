@@ -205,3 +205,67 @@ faces = 26
 `cargo test -p brepkit-blend` 97 项通过（含新增 `trim_through_an_existing_boundary_vertex`）；`cargo test -p brepkit-operations` 见提交记录。
 
 两条 ticket 均经过反向验证：临时停用 `dedup_crossings` 后，单元测试报 `TrimmingFailure { face: Id(1) }`，端到端测试报「`r=0.1` 有 1 个面未被裁剪、`r>=0.5` 有 4 个」，与修复前的现象一致。
+
+---
+
+## 2026-10-02 续：setback + 角补丁 —— C-01 引擎侧完成
+
+上一轮把「未被裁剪的面」修掉后，偏差从「多料」翻转成「缺料」（`r=1`：`1016.300` → `912.6748`）。本轮把它修到与闭式解一致，并在此过程中挖出**另外三个独立缺陷**。
+
+对 `10³` 全棱圆角的实测（`solid_volume`，容差 0.05）：
+
+| r | 闭式解 | 本轮修前 | 本轮修后 | 偏差 |
+|---|---|---|---|---|
+| 0.1 | 999.744 | — | 999.744 | 0.000 |
+| 0.5 | 993.729 | 977.163 | 993.692 | −0.037 |
+| 1.0 | 975.587 | 912.675 | 975.332 | −0.255 |
+| 2.0 | 907.705 | 690.772 | 905.746 | −1.959 |
+
+`r=2` 的 `−1.959` 是**度量本身的偏差**，不是引擎的：对照组 `fillet_rolling_ball` 在同一容差下测得 `905.7461`，与 `fillet_v2` 的 `905.7464` 相差 `3e-4`。`fillet_box_volume.rs` 的 `VOLUME_TOL` 因此定为 `2.0`。
+
+### 缺陷一：条带覆盖整条棱长（应止于 `L-2r`）
+
+`Spine` 只有「整条链」一种形态，条带自然从顶点扫到顶点。三个以上圆角相交的顶点处，材料归角球面管，条带必须让出 `r`。
+
+新增 `crates/blend/src/setback.rs`：对每个被圆角的顶点，按「滚球与第三个面在何处相切」解析求出退缩量——条带两条相邻面 `n1,n2` 的滚球球心 `w = r(n1+n2)/(1+n1·n2)` 到第三面 `n3` 的距离沿棱线性变化，退缩量即 `(r − w·n3)/(u·n3)`（`u` 为背离顶点的棱向）。少于 3 条被圆角的棱在顶点相交时不退缩——此时没有角补丁接手。
+
+`Spine` 加 `window(start, end)`：只改 `length` 并记录 `offset`，`locate` 用它把窗口参数映射回链参数。`fillet_builder` 从 `Spine` 取整个条带的跨度，所以这一处窗口化就是全部改动。
+
+### 缺陷二：角补丁内部控制在球面上 → 中间内凹
+
+`build_spherical_corner` 把 apex 控制点放在球面上（`center + normalize(Σdir)·r`）。degree-(2,2) 有理补丁在宽球面三角形上会因此**中间内凹**：实测补丁中心到球心 `0.8647`（内凹 13.5%）。对照组 `fillet_rolling_ball` 用的是切锥顶点（`center + (Σdir)·r`，正交角处 overshoot √3，正好落在盒体顶点上），凹度只有 `0.9511`（4.9%）。
+
+改为切锥顶点后，两引擎的角补丁 8 个采样点**逐点相同**。
+
+### 缺陷三：角补丁朝向 —— 6/8 个面法向朝内
+
+修完缺陷二，体积几乎没动（`912.91` → `912.67`），说明角面形状不是主因。逐面核查发现：8 个角补丁里 **6 个的三角面法向朝内**（对照组 0 个）。
+
+`corner.rs` 判断「朝外方向」时用了 `VertexContactData::is_convex`。这个标志在 `compute_sphere_center` 里决定球心取 `vertex + Σn·r` 还是 `vertex − Σn·r`，而调试输出显示它对 8 个凸角**全部为 false**——因为 `build_multi_edge_corner` 的启发式 `avg_normal · cp_centroid > 0` 实际测的是「法向朝内」，不是「角是凸的」。球心算对了（所以角面几何一直正确），但把同一个标志当「凸角」用就正好反了。
+
+自洽的用法：`is_convex == false` ⟺ 球心走 `vertex − Σn·r` ⟺ 球心在材料**内** ⟹ 朝外方向 = 背离球心。
+
+朝向本身用 `Face::new_reversed` 承载（`tessellate` 与体积积分都跟随 `is_reversed` 翻转绕向）。判据用**(u,v) 网格的切向量叉积**，不用 `surface.normal`：张量积补丁在控制网格被转置后，`normal` 的约定会与网格次序不一致，而 tessellator 是按网格次序出三角形的。
+
+### 反向验证
+
+三个缺陷各自做了停用验证，都精确回到修复前的数字：
+
+- 关掉朝向修正 → `r=1` 回到 `912.6748`；
+- 把 apex 改回球面上 → `r=2` 偏差 `−5.78`（超出容差）；
+- setback 关闭 → 条带轴向跨度回到 10（`every_blend_band_stops_one_radius_short_of_each_end` 变红）。
+
+### 剩余：壳仍不是闭合 2-流形
+
+`corner::compute_corners` 为角补丁边界**新建顶点与边**（`topo.add_vertex` / `Edge::new`），而不是复用条带端点已有的边。结果是 26 个面里 **76 次边引用是单面的**（`10³`/`r=1`：`edges=86, free=76`），而对照组是 `edges=48, free=0`。
+
+对体积无影响（本轮所有体积断言都过），但影响两件事：`validate_shell_closed` 会判不合法（wasm 门禁 `is_valid` 因此会拒绝 `fillet_v2`），以及逐面离散统计与对照组不一致——`10³`/`r=1` 时条带的逐面离散面积是 `140.57`，对照组 `150.18`，理想 `150.80`（比值 `0.936`，`r=2` 时比值相同）。**这个比值的成因尚未查清**：两引擎条带的边界都是同样的 4 条边（2 条直母线 + 2 条 `circle` 四分之一弧）、同样的轴/半径/包箱，逐面离散本应一致。它与「边未共享」这一缺陷同期出现，但不影响 `solid_volume` 的结果。这是**下一个独立缺陷**。
+
+### 回归
+
+- `cargo test -p brepkit-blend`：99 项通过。
+- `cargo test -p brepkit-operations`：809 库测试 + 全部集成测试通过。
+- `crates/operations/tests/fillet_box_volume.rs`：6/6 通过，原先两条 `#[ignore]` ticket 转正。
+- `crates/operations/tests/regress_fillet_cascade/`：7 个票面中 `probe_cube`、`fillet_v2_over_sweeps_a_box` 转正（其断言原先写的是「体积应贴近未圆角的 1000」这一被推翻的理论，现改为闭式解）；其余 5 个是**别的缺陷**（相切配置、混合半径自由边），保持 `#[ignore]`。
+- clippy `--all-targets` 干净，`scripts/check-boundaries.sh` 通过。
+

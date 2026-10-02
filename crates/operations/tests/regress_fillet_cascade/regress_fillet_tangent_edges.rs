@@ -156,29 +156,33 @@ fn tangent_short_edges_produce_the_capsule() {
 }
 
 #[test]
-#[ignore = "C-01: fillet_v2 over-sweeps a box (volume drifts linearly in r); unfixed"]
 fn fillet_v2_over_sweeps_a_box() {
-    // The second half of C-01, isolated: on a cube `fillet_v2` never errors,
-    // it simply returns too much material, and the drift grows roughly
-    // linearly in `r` (+1.3 at r=0.01, +13.4 at r=0.1, +135.3 at r=1), i.e.
-    // the strips sweep less than the full exterior dihedral angle.
+    // The box half of C-01, isolated: on a cube `fillet_v2` used to return too
+    // much material, with the drift growing roughly linearly in `r`
+    // (+1.3 at r=0.01, +13.4 at r=0.1, +135.3 at r=1) — the strips swept less
+    // than the full exterior dihedral angle.
     //
-    // Calibrated against the one incontestable baseline: as `r -> 0` the
-    // volume must converge to the un-filleted cube. No closed form is used,
-    // because three derivations of the rounded-cube volume disagreed
-    // (937.89 / 975.59 / 996.19), so the limit is the reference instead.
+    // This used to be a ticket asserting the volume stayed within 1.0 of the
+    // un-filleted 1000.0. That baseline was itself wrong (a box fillet loses
+    // 2.5752*(lx+ly+lz)*r^2, so 24.4 at r=1), so the ticket was unsatisfiable
+    // by a correct engine. It now asserts the closed form.
     let mut failures = Vec::new();
-    for &r in &[0.0, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0] {
+    // `r = 0` is excluded: a zero radius is rejected as invalid input before
+    // any geometry is built.
+    for &r in &[0.001, 0.01, 0.1, 0.5, 1.0, 2.0] {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, 10.0, 10.0, 10.0).unwrap();
         let edges = solid_edges(&topo, solid).unwrap();
         match fillet_v2(&mut topo, solid, &edges, r) {
             Ok(res) => {
                 let vol = solid_volume(&topo, res.solid, 0.05).unwrap();
-                if r >= 0.1 && (vol - 1000.0).abs() >= 1.0 {
+                let expect = crate::analytic_box_fillet_volume(10.0, 10.0, 10.0, r);
+                // 2.0 rather than 1.0: the tessellation-based measurement is
+                // itself 1.96 low at r=2, identically for the control engine.
+                if (vol - expect).abs() >= 2.0 {
                     failures.push(format!(
-                        "r={r}: volume {vol:.4} is off the 1000.0 baseline by {:.4}",
-                        vol - 1000.0
+                        "r={r}: volume {vol:.4}, analytic {expect:.4} (delta {:+.4})",
+                        vol - expect
                     ));
                 }
             }
@@ -187,6 +191,6 @@ fn fillet_v2_over_sweeps_a_box() {
     }
     assert!(
         failures.is_empty(),
-        "fillet_v2 must track the un-filleted cube as r shrinks; drift: {failures:?}"
+        "fillet_v2 must reproduce the closed form on a box; drift: {failures:?}"
     );
 }

@@ -107,6 +107,17 @@ impl<'a> FilletBuilder<'a> {
 
         let adjacency = topo.build_adjacency(self.solid)?;
 
+        // Where three or more filleted edges meet, each stripe stops short of
+        // the vertex so the spherical corner patch can take over. Measured on
+        // the topology, before anything is built: every downstream stage — the
+        // blend surface, its contact lines, and the corner patches derived from
+        // their ends — then sees the shorter stripe without further changes.
+        let targets: Vec<(EdgeId, f64, f64)> = all_edges
+            .iter()
+            .map(|&(e, law_idx)| (e, laws[law_idx].evaluate(0.0), laws[law_idx].evaluate(1.0)))
+            .collect();
+        let setbacks = crate::setback::compute_setbacks(topo, &adjacency, &targets);
+
         let shell_id = topo.solid(self.solid)?.outer_shell();
         let original_faces: Vec<FaceId> = topo.shell(shell_id)?.faces().to_vec();
 
@@ -118,7 +129,9 @@ impl<'a> FilletBuilder<'a> {
         let mut stripe_results: Vec<StripeResult> = Vec::new();
 
         for &(edge_id, law_idx) in &all_edges {
-            let result = compute_stripe_for_edge(topo, &adjacency, edge_id, &laws[law_idx]);
+            let hold_back = setbacks.get(&edge_id).copied().unwrap_or((0.0, 0.0));
+            let result =
+                compute_stripe_for_edge(topo, &adjacency, edge_id, &laws[law_idx], hold_back);
             match result {
                 Ok(sr) => {
                     touched_faces.insert(sr.stripe.face1);
@@ -683,6 +696,7 @@ fn compute_stripe_for_edge(
     adjacency: &brepkit_topology::adjacency::AdjacencyIndex,
     edge_id: EdgeId,
     law: &RadiusLaw,
+    hold_back: (f64, f64),
 ) -> Result<StripeResult, BlendError> {
     let adj_faces = adjacency.faces_for_edge(edge_id);
     if adj_faces.len() != 2 {
@@ -708,6 +722,16 @@ fn compute_stripe_for_edge(
     let face2_reversed = face2_data.is_reversed();
 
     let spine = Spine::from_single_edge(topo, edge_id)?;
+
+    // Hand the corners' share of the edge over to the corner patches. Every
+    // stage below reads its extent from the spine, so windowing it here is the
+    // whole change: the stripe becomes a stripe over `hold_back[0]..L-hold_back[1]`.
+    let (start, end) = hold_back;
+    let spine = if start > 0.0 || end > 0.0 {
+        spine.window(start, spine.length() - end)
+    } else {
+        spine
+    };
 
     // Get radius at the spine midpoint for the analytic path.
     let radius = law.evaluate(0.5);

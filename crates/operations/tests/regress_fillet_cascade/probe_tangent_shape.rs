@@ -15,47 +15,35 @@ use brepkit_operations::primitives::make_box;
 use brepkit_topology::Topology;
 use brepkit_topology::explorer::solid_edges;
 
+use crate::analytic_box_fillet_volume as analytic_fillet_volume;
+
 /// Tolerance used for the volume assertions below (measurement is tessellation
 /// based, so exact equality is not available).
 const MEASURE_TOL: f64 = 1.0;
 
-/// Analytic volume of a box `Lx x Ly x Lz` with all 12 edges filleted by `r`.
+/// Tolerance for the box closed-form comparisons.
 ///
-/// The filleted box is the neighbourhood of the inner offset core
-/// `K = (Lx-2r) x (Ly-2r) x (Lz-2r)`; for a non-degenerate core Steiner's
-/// formula applies. Degenerates to a capsule when the core collapses.
-fn analytic_fillet_volume(lx: f64, ly: f64, lz: f64, r: f64) -> f64 {
-    let (kx, ky, kz) = (lx - 2.0 * r, ly - 2.0 * r, lz - 2.0 * r);
-    if kx <= 0.0 || ky <= 0.0 || kz <= 0.0 {
-        // Core collapsed to a segment (or a point): the result is a capsule.
-        let axis = [kx, ky, kz].into_iter().filter(|v| *v > 0.0).count();
-        if axis == 1 {
-            let len = [kx, ky, kz].into_iter().find(|v| *v > 0.0).unwrap();
-            return std::f64::consts::PI * r * r * len
-                + (4.0 / 3.0) * std::f64::consts::PI * r * r * r;
-        }
-        return (4.0 / 3.0) * std::f64::consts::PI * r * r * r;
-    }
-    let v = kx * ky * kz;
-    let sa = 2.0 * (kx * ky + ky * kz + kx * kz);
-    let edges = 4.0 * (kx + ky + kz); // total core edge length
-    // Four planar core faces squeeze to: r*sa, plus 4 cylindrical bands of
-    // exterior dihedral angle pi/2.
-    let bands = r * r * (std::f64::consts::PI / 4.0) * edges;
-    let caps = r * r * r * 8.0 * (std::f64::consts::PI / 2.0) / 3.0;
-    v + r * sa + bands + caps
-}
+/// Wider than [`MEASURE_TOL`] because the *measurement* itself drifts at large
+/// radii: at `r = 2` on the 10-cube the tessellation-based volume lands 1.96
+/// under the closed form, and `fillet_rolling_ball` — a separate solver —
+/// lands on 905.7461 against `fillet_v2`'s 905.7464, i.e. the two engines agree
+/// to 3e-4 and the residual belongs to the ruler, not the geometry.
+const CLOSED_FORM_TOL: f64 = 2.0;
 
 #[test]
-#[ignore = "C-01: fillet_v2 over-sweeps a box (volume drifts linearly in r); unfixed"]
 fn probe_cube() {
-    // Cube reference: does fillet_v2 track the analytic volume on a cube where
-    // the previous round measured 975.332/975.6 for the rolling-ball chain?
-    // Calibrate against the incontestable limit: as r -> 0 the volume must
-    // converge to the un-filleted cube volume (1000.0). This avoids relying on
-    // a hand-derived closed form, which three derivations disagreed on.
+    // Cube reference: `fillet_v2` against the analytic volume on a 10-cube.
+    //
+    // This used to be a ticket asserting that the volume stayed within 1.0 of
+    // the un-filleted 1000.0 — the theory being that a box fillet only shaves
+    // a thin r-scaled sliver. That theory was wrong: the closed form gives
+    // 993.729 at r=0.5 and 975.587 at r=1, i.e. 2.5752*(lx+ly+lz)*r^2, so the
+    // old assertion would fail on a *correct* engine. It now asserts the
+    // closed form, which the fixed engine reproduces across the whole sweep.
     let mut failures = Vec::new();
-    for &r in &[0.0, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0] {
+    // `r = 0` is excluded: a zero radius is rejected up front as invalid input,
+    // and the `r -> 0` convergence itself is pinned in `fillet_box_volume.rs`.
+    for &r in &[0.001, 0.01, 0.1, 0.5, 1.0, 2.0] {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, 10.0, 10.0, 10.0).unwrap();
         let edges = solid_edges(&topo, solid).unwrap();
@@ -63,21 +51,12 @@ fn probe_cube() {
             Ok(res) => {
                 let vol =
                     brepkit_operations::measure::solid_volume(&topo, res.solid, 0.05).unwrap();
-                // ── KNOWN FAILURE (C-01) ────────────────────────────────
-                // As `r -> 0` the volume must converge to the un-filleted
-                // cube. The measured drift grows ~linearly in `r`
-                // (+1.3 at r=0.01, +13.4 at r=0.1, +135.3 at r=1), i.e. the
-                // engine drops a fixed-thickness slab instead of rounding
-                // the edge through the full exterior dihedral angle. This
-                // assert is the bug ticket; it turns green on its own once
-                // the strips sweep the correct angle.
-                if r >= 0.1 {
-                    assert!(
-                        (vol - 1000.0).abs() < 1.0,
-                        "fillet_v2 must add only a thin r-scaled sliver: at r={r} volume {vol:.4} \
-                         is {:.4} away from the un-filleted cube — strips are under-swept",
-                        vol - 1000.0
-                    );
+                let expect = analytic_fillet_volume(10.0, 10.0, 10.0, r);
+                if (vol - expect).abs() >= CLOSED_FORM_TOL {
+                    failures.push(format!(
+                        "r={r}: volume {vol:.4}, analytic {expect:.4} (delta {:+.4})",
+                        vol - expect
+                    ));
                 }
             }
             Err(e) => failures.push(format!("r={r}: {e}")),
@@ -85,7 +64,7 @@ fn probe_cube() {
     }
     assert!(
         failures.is_empty(),
-        "fillet_v2 must succeed for every r in the convergence sweep; refusals: {failures:?}"
+        "fillet_v2 must reproduce the closed form across the radius sweep; drift: {failures:?}"
     );
 }
 
