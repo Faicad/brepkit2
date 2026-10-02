@@ -16,7 +16,7 @@ use crate::analytic;
 use crate::builder_utils::sample_nurbs_endpoints;
 use crate::spine::Spine;
 use crate::stripe::StripeResult;
-use crate::trimmer::{self, TrimKeep, TrimSide};
+use crate::trimmer::{self, TrimKeep};
 use crate::{BlendError, BlendResult};
 
 /// Internal representation of a chamfer edge set with its distance parameters.
@@ -206,28 +206,21 @@ impl<'a> ChamferBuilder<'a> {
             let contact1_pts = sample_nurbs_endpoints(&stripe.contact1);
             let contact2_pts = sample_nurbs_endpoints(&stripe.contact2);
 
-            let keep_side1 =
-                if let (Some(sec), Ok(face)) = (stripe.sections.first(), topo.face(stripe.face1)) {
-                    let n = face.surface().normal(0.0, 0.0);
-                    if n.dot(sec.center - sec.p1) > 0.0 {
-                        TrimSide::Right
-                    } else {
-                        TrimSide::Left
-                    }
-                } else {
-                    TrimSide::Right
-                };
-            let keep_side2 =
-                if let (Some(sec), Ok(face)) = (stripe.sections.first(), topo.face(stripe.face2)) {
-                    let n = face.surface().normal(0.0, 0.0);
-                    if n.dot(sec.center - sec.p2) > 0.0 {
-                        TrimSide::Right
-                    } else {
-                        TrimSide::Left
-                    }
-                } else {
-                    TrimSide::Right
-                };
+            // Keep the side of each contact line AWAY from the chamfered edge:
+            // the strip between the contact line and the old edge is what the
+            // bevel replaces.
+            //
+            // The side must be resolved inside the trimmer. Its Left/Right
+            // frame follows each face's own wire traversal, and the two faces
+            // of one edge traverse that edge in *opposite* directions, so any
+            // single side picked out here is correct for one face and
+            // backwards for the other — which trims that face down to the
+            // sliver that should have been removed and drops the bulk of it.
+            // A plane-side test cannot tell them apart either: the bevel lies
+            // on the inward side of both face normals, so it yields the same
+            // constant for both.
+            let spine_pt = stripe.spine.evaluate(topo, 0.0)?;
+            let keep = TrimKeep::AwayFrom(spine_pt);
 
             let current_face1 = face_replacements
                 .get(&stripe.face1)
@@ -238,7 +231,7 @@ impl<'a> ChamferBuilder<'a> {
                 current_face1,
                 &contact1_pts,
                 &[(0.0, 0.0), (1.0, 0.0)],
-                TrimKeep::Side(keep_side1),
+                keep,
             );
 
             match trim1 {
@@ -263,7 +256,7 @@ impl<'a> ChamferBuilder<'a> {
                 current_face2,
                 &contact2_pts,
                 &[(0.0, 0.0), (1.0, 0.0)],
-                TrimKeep::Side(keep_side2),
+                keep,
             );
 
             match trim2 {

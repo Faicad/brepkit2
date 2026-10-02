@@ -382,7 +382,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 | 项 | 说明 |
 |----|------|
-| C-02 `mixed_radius_fillets_stay_watertight` 仍红 | 它走 `brepkit_operations::fillet::fillet_variable`（`operations/src/fillet/mod.rs` 里的**另一套装配**），不经过 `FilletBuilder`，焊接没接上去。失败信息已从"体积不对"变成"free edge"，与 C-01 同型。焊接是通用工具，接上去是下一步，不混在本轮提交里 |
+| C-02 `mixed_radius_fillets_stay_watertight` 仍红 | **第十轮重新诊断：与 C-01 不同型，接焊接解决不了，不要照搬上一轮的做法。** 详见 §0''''''''' |
 | `chamfer_builder` | 同样有自己的装配路径，同样未接焊接 |
 | `check_shell_orientation` 报 24 条同向边 | 第三轮（§0'''.2）判定为拓扑标记层不一致、无几何后果，本轮未处理 |
 
@@ -401,6 +401,86 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 | `cargo check -p brepkit-wasm --lib` | ✅ 通过 |
 
 改动文件：`crates/blend/src/sew.rs`（新）、`crates/blend/src/lib.rs`（注册模块）、`crates/blend/src/fillet_builder.rs`（装配后调用焊接）；新增 `crates/operations/tests/fillet_shell_manifold.rs`。诊断用的临时测试 `diag_fillet_shell.rs` 已删除，未留下调试脚本。
+
+---
+
+## 0'''''''''. 第十轮实施记录（C-02 重新诊断 + chamfer 焊接）
+
+### 0'''''''''.1 C-02：推翻上一轮的判断（焊接解决不了）
+
+上一轮 §0''''''''.3 写的是「C-02 与 C-01 同型，焊接接上去是下一步」。**这个判断是错的**，第十轮实测推翻，记录在此以免后续照搬。
+
+复现入口仍是 `regress_fillet_cascade::regress_fillet_mixed_radius` 的对照段：均匀半径 `r=1` 的 `10³` box 全 12 棱走 `fillet_variable`，`validate_shell_closed` 直接报 `edge index 67 is used by 1 wires (free edge)`。**均匀半径就已经漏**，所以失败与"混合半径"无关，角部本身就没处理。
+
+诊断 dump（`diag_fillet_variable`）：
+
+| 项 | 实测 |
+|----|------|
+| 面 | **18 = 6 Plane + 12 Nurbs** —— 正确的全棱圆角应为 `6 + 12 + 8 = 26`，**8 个角补丁根本不存在** |
+| 边 | `edges=60, free=24, over-shared=0`；`24 = 8 角 × 3`，每个角一组三条 |
+| 自由边身份 | 24 条全部是**条带的接触线**，且是**全长**的：如 `(10,1,10)-(0,1,10)` 横跨 `x∈[0,10]`；对照组条带接触线应为 `x∈[1,9]` |
+
+结论：`fillet_variable` 缺的不是焊接，而是**两个几何构件**——
+
+1. **条带没有 setback。** 条带沿整条棱长铺满（`t∈[0,1]`），端弧落在棱的端截面内。实测该端弧上的点（如 `(0.293, 0, 9.707)`）到相邻棱的距离只有 `0.29 < r`，即它伸进了本该被切掉的材料里。正确的条带必须退到与角球的相切圆处（`10³` box、`r=1` 时即 `x∈[1,9]`）。这与 §0'''''.3 记录的 `FilletBuilder` 侧同一类缺陷，只是那一侧已在第六轮修掉，这一侧从未修。
+2. **角补丁缺失。** 三个条带退让后，角部留下一个由三条弧围成的曲边三角形，需要一个球面角补丁（`fillet_v2` 由 `corner::compute_corners` 提供，`fillet_variable` 完全没有）。
+
+**焊接为什么不够**：焊接只能合并"同一条几何曲线的重复实体"。这里的 24 条自由边各自**没有配对对象**——邻接平面压根没有被裁掉，条带的接触线是悬空的。把它们两两缝上只会得到一条"直弦 ↔ 圆弧"强行共用的边，几何上仍然是一处自相交。
+
+### 0'''''''''.2 一次走错的路（记录在案）
+
+中途怀疑过裁剪循环里 `(true, true, _)` 分支的两个接触点顺序写反了（先 push `ei_after` 的 `t=0` 接触、后 push `ei_before` 的 `t=1` 接触，而单侧分支 `(true,false)` / `(false,true)` 确立的约定是"先到边后离边"）。按约定改序后**实测更糟**：
+
+- 现状顺序产出的多边形是「四角被削的正方形」，简单不自交；
+- 改序后产出的多边形**自相交** —— 因为接触点没有 setback，两条相邻接触线会各自伸过对方的角点（`y=1` 与 `x=9` 在 `(9,1)` 处交叉）。
+
+也就是说：顺序确实是错的，但它是"正确而不完整"的改动——先把顺序改对，就会立刻暴露 setback 缺失。**缺 setback 是真缺陷，顺序只是次生症状**，单独落地顺序改动只会把一个开放的壳换成一个自交的壳。已还原（`git diff` 为空），未提交。
+
+判据留给后续：**正确的裁剪面是内缩正方形 `[r, 10−r]²`（4 个顶点），不是八边形**。因为面内「到各棱距离 ≥ r」的区域就是那个正方形；角上出现"两个接触点 + 一条弦"本身就是没做 setback 的症状。
+
+### 0'''''''''.3 C-02 的规模判定
+
+需要同时落地 setback + 角补丁 + 混合半径下的角部构造（三个半径不同时没有公共球，比等半径更难）。上一轮 C-01 的同类工作横跨了三轮（trimmer → 引擎 → 焊接）。**C-02 不是一个"一个提交一个缺陷"的粒度，本轮不做。**
+
+### 0'''''''''.4 本轮实际落地：chamfer 裁剪保留侧（已修复）
+
+上一条"留给后续"写的是 `chamfer_builder` 未接焊接。**接上去实测是空操作**：`cargo test` 前后 `n=1..12` 的 `F/E/free` 一模一样。原因是这里不共享的曲线不是"同一条曲线的重复实体"（那是 C-01 的情形、焊接能修），而是端点本就对不上的几何缺口。于是继续往下挖，找到并修掉了下面这个真缺陷。
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `crates/operations/tests/chamfer_trim_extent.rs::trimmed_faces_keep_their_bulk` —— 倒角后，共享该棱的面必须仍能伸到离该棱约 `SIDE` 处；对照 `control_unchamfered_faces_span_the_whole_side` |
+| 量化 | 缺陷态下该面横向只剩 `d`（`d=0.5/1/2` → `0.5000 / 1.0000 / 2.0000`），即**恰好是那条本该被倒角替掉的薄条**；修复后为 `10` |
+| 根因 | `chamfer_builder` 用 `n·(center − p) > 0 ? Right : Left` 逐面定保留侧，传给 `TrimKeep::Side`。但倒角体恒在两个面法向的内侧，所以两个面算出的是**同一个常量**；而一条棱的两个邻面以**相反方向**遍历该棱，`Left/Right` 在各自 wire 帧里含义相反 —— 于是必有一个面被裁反 |
+| 判据来源 | `trimmer.rs` 里 `TrimKeep` 的文档已经写明：`Side` 是"trimmer 内部帧"的语义，**调用方无法预测**；正确用法是 `AwayFrom`（给一个 3D 点，由 trimmer 在自己的帧里解析）。`fillet_builder.rs:214` 用的正是 `AwayFrom(spine_pt)`，chamfer 侧是唯一没跟上的 |
+| 修复 | 删除两处 `keep_side1/2` 计算，改为对两个面共用一个 `TrimKeep::AwayFrom(stripe.spine.evaluate(topo, 0.0)?)`，与 fillet 侧一致 |
+| 期望值 | 纯几何不变量（面的横向跨度），不依赖壳是否闭合、不引用数值 golden |
+
+### 0'''''''''.5 chamfer 仍未闭环：侧面角点尖刺
+
+修复后壳**仍未闭合**，单棱倒角剩 6 条自由边。已定位：共享倒角棱的两个面裁对了，但**只是碰到该棱端点**的第三个面（如 box 上 `x=0`）仍保留一条穿过已切掉角点的尖刺 —— 它的 wire 是 `(0,0,9) → (0,0,10) → (0,1,10)`，多出来的 `(0,0,10)` 正是被倒角切掉的原角点。倒角条带的端边因此没有配对对象。
+
+- 面数已经是对的（`F = 6 + 12 = 18`），缺的是那第三面上的**角切**：沿倒角平面与该面的交线段（对 `x=0` 即 `(0,1,10)-(0,0,9)`）裁掉含原角点的小三角。
+- 试过一版：用 `trim_face` + `TrimKeep::AwayFrom(corner)` 传该线段。`trim_face` 返回了新面（`trimmed=true`），但产出的 wire 仍是六边形、尖刺还在 —— 疑似 trimmer 在"接触线两端落在**相邻**两条边上"这一退化情形下没有真正去掉一侧。**未落地，已回滚**，代码里没留这段。
+- 一个坑记在这里：`Spine` 是按**弧长**参数化的，`evaluate(topo, 1.0)` 给的是沿棱走 1 个单位处、**不是**棱的另一端；要取端点得用 `evaluate(topo, spine.length())`，闭合 spine（环形棱）没有端点。
+- 已挂票：`crates/operations/tests/chamfer_shell_manifold.rs` 主用例标 `#[ignore]`，附实测数据（`V/E/F = 70/71/18`，`free=70`，17 个连通分量；单棱即 `F=7, free=8`）。
+
+### 0'''''''''.6 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证 | 把 `keep` 临时改回恒定的 `TrimKeep::Side(TrimSide::Left)` → 主用例转红（横向恰为 `d`），对照仍绿；恢复后转绿。测试确实锁定该缺陷 |
+| `chamfer_trim_extent` | ✅ 2 passed |
+| `chamfer_shell_manifold` | ✅ 1 passed + 1 ignored（未闭环的票） |
+| `blend_integration` / `convex_chamfer_volume_check` / `regress_chamfer_obtuse_ridge` | ✅ 13 passed（既有 chamfer 语义未被破坏） |
+| `cargo test -p brepkit-blend` | ✅ 99 passed |
+| `cargo test -p brepkit-operations` | ✅ 全量通过（5m33s，0 FAILED / 0 panic） |
+| `cargo fmt --all -- --check` | ✅ |
+| `cargo clippy -p brepkit-blend -p brepkit-operations --all-targets` | ✅ 零告警 |
+| `scripts/check-boundaries.sh` | 见下 |
+
+改动文件：`crates/blend/src/chamfer_builder.rs`；新增 `crates/operations/tests/chamfer_trim_extent.rs` 与 `crates/operations/tests/chamfer_shell_manifold.rs`（后者为 `#[ignore]` 票）。诊断脚本 `diag_chamfer.rs` / `diag_fillet_variable.rs` 已删除。
+
+> 过程教训：用 python 改写源文件会把 LF 行尾变成 CRLF，导致 `cargo fmt` 把整个文件重写（971 行 diff）。本轮已还原为 LF，改动回到 43 行。
 
 ---
 
