@@ -312,6 +312,14 @@ impl<'a> FilletBuilder<'a> {
         result_faces.extend(&blend_face_ids);
         result_faces.extend(&corner_face_ids);
 
+        // Each producer above minted its own edge entity for the curves it
+        // shares with a neighbour — the trimmer's contact line, the stripe's
+        // flank, the corner patch's boundary arc are three copies of one
+        // curve. Left alone every one of them is referenced by a single face,
+        // so the shell has free edges and is not a closed manifold. Welding is
+        // what turns the pile of faces into a shell.
+        let result_faces = crate::sew::weld_faces(topo, &result_faces)?;
+
         let new_shell = Shell::new(result_faces)?;
         let new_shell_id = topo.add_shell(new_shell);
         let new_solid = Solid::new(new_shell_id, Vec::new());

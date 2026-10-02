@@ -17,6 +17,7 @@ pub(crate) mod g1_chain;
 pub mod radius_law;
 pub(crate) mod section;
 pub(crate) mod setback;
+pub(crate) mod sew;
 pub(crate) mod spherical_triangle;
 pub(crate) mod spine;
 pub(crate) mod stripe;

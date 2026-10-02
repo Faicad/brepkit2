@@ -359,6 +359,51 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 ---
 
+## 0''''''''. 第九轮实施记录（C-01 遗留：圆角结果壳不是闭合 2-流形）
+
+### 0''''''''.1 结果：已修复
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `crates/operations/tests/fillet_shell_manifold.rs::walking_engine_box_fillet_is_a_closed_manifold` —— `r=0.5/1/2` 三个半径下 `validate_shell_closed` 全部拒绝（`edge index N is used by 1 wires (free edge)`），壳同时分裂成 **17 个连通分量**；对照用例 `control_rolling_ball_box_fillet_is_a_closed_manifold`（`fillet_rolling_ball`，另一套求解器）全程绿 |
+| 量化 | 修复前 `edges=86, free=76, over-shared=0`。引用总数 `76×1 + 10×2 = 96`，与正确拓扑的 `48×2 = 96` **完全相等** —— 这一条直接把根因限定在"重号"：曲线是对的，只是每条被造了两三个实体 |
+| 根因 | 三个生产者各自造边，互不通气：① trimmer 在裁剪后的邻面上造 contact edge；② `create_blend_face_with_contacts` 为条带侧面再造一份（adopt 只在 10/24 条上成功）；③ `corner::compute_corners` 为角补丁边界造第三份。几何上是同一条曲线——实测角补丁边 `a=(1,1,0) b=(1,0,1)` 与条带端弧 `a=(1,0,1) b=(1,1,0)` 端点精确重合、方向相反 |
+| 修复 | 新增 `crates/blend/src/sew.rs::weld_faces`，在 `FilletBuilder::build` 装配完成后、`Shell::new` 之前调用：① 顶点按空间哈希合并（网格边长 1e-6 + 27 邻格探测，避免跨格漏配）；② 边按焊接后的**端点对**合并，代表边保留首个副本的曲线，且端点保持该曲线自身的方向，使参数化仍沿几何正向；③ 面按焊接后的边重建 wire，逐条重算 `is_forward` 以保住原有遍历方向 |
+| 保守性 | wire 焊接后少于 3 条边或不再闭合时，该面**原样放行**而不是丢弃 —— 略微开放的壳比缺一个面的壳降级得更体面 |
+| 修复后 | `V=24 E=48 F=26`，`V−E+F=2`，`free=0`、`over-shared=0`，三个半径一致；边数与对照组 `fillet_rolling_ball` 的 48 相同 |
+| 期望值 | 纯拓扑不变量（Euler-Poincaré = 2、每条边被引用恰好两次、单连通），**不引用任何数值 golden** |
+
+### 0''''''''.2 两个判断依据（不是拍脑袋）
+
+- **可以只按端点对合并边。** 判据是「同一条几何曲线的两个副本端点必然重合，而不同曲线端点必然不同」。球面角补丁的三条弧跑在三对**不同**的切点之间，条带的四条边也是四个不同的点对，所以端点对是充分的键。另一个前提是反向遍历安全：`Circle3D::domain()` 恒为整圆 `[0, 2π]`（`math/src/traits.rs:229`），弧的范围由边的端点顶点决定，因此 `forward/reverse` 只改变遍历方向、不改变几何。
+- **中点不作为判据。** 第一版诊断用「参数域中点」做指纹，结果角补丁的 Nurbs 弧（`mid=(1, 0.2929, 0.2929)`，确实在球面上）与条带的 Circle 弧（`mid` 落在端点上）拼不上，误以为两者不是同一条曲线。根因是 `Circle3D` 的域是整圆、域中点与弧中点无关。改按端点比对后立刻配对成功 —— 这条记录在这里是为了防止后续再拿域中点当几何中点用。
+
+### 0''''''''.3 未修 / 留给后续
+
+| 项 | 说明 |
+|----|------|
+| C-02 `mixed_radius_fillets_stay_watertight` 仍红 | 它走 `brepkit_operations::fillet::fillet_variable`（`operations/src/fillet/mod.rs` 里的**另一套装配**），不经过 `FilletBuilder`，焊接没接上去。失败信息已从"体积不对"变成"free edge"，与 C-01 同型。焊接是通用工具，接上去是下一步，不混在本轮提交里 |
+| `chamfer_builder` | 同样有自己的装配路径，同样未接焊接 |
+| `check_shell_orientation` 报 24 条同向边 | 第三轮（§0'''.2）判定为拓扑标记层不一致、无几何后果，本轮未处理 |
+
+### 0''''''''.4 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证 | 在 `weld_faces` 入口临时 `return Ok(faces.to_vec())` → 主用例回到红（`free edge` + 17 分量），对照用例仍绿；恢复后转绿。测试确实锁定该缺陷 |
+| Euler / 计数 | `r=0.5/1/2` 均为 `V=24 E=48 F=26`、`V−E+F=2`、`free=0` |
+| `cargo test -p brepkit-operations --test fillet_shell_manifold` | ✅ 2 passed（主用例 + 对照） |
+| `cargo test -p brepkit-operations --test fillet_box_volume` | ✅ 6 passed（体积闭式解未被焊接破坏） |
+| `cargo test -p brepkit-blend` | ✅ 99 项通过 |
+| `cargo test -p brepkit-operations` | ✅ 814 库测试 + 全部集成测试通过，7 ignored |
+| `cargo clippy -p brepkit-blend -p brepkit-operations --all-targets` | ✅ 零告警（修掉 `clippy::map_entry` 与 `clippy::format_push_string`） |
+| `scripts/check-boundaries.sh` | ✅ All crate boundaries valid |
+| `cargo check -p brepkit-wasm --lib` | ✅ 通过 |
+
+改动文件：`crates/blend/src/sew.rs`（新）、`crates/blend/src/lib.rs`（注册模块）、`crates/blend/src/fillet_builder.rs`（装配后调用焊接）；新增 `crates/operations/tests/fillet_shell_manifold.rs`。诊断用的临时测试 `diag_fillet_shell.rs` 已删除，未留下调试脚本。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -412,7 +457,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 | ID | 2.x 症状 | 本仓库状态 |
 |----|---------|-----------|
-| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **已修**（第六轮，见 §0'''''）：`10³` box 全棱的实测体积现已与闭式解一致（`r=0.1/0.5/1/2` 偏差 `0.000 / −0.037 / −0.255 / −1.959`，`r=2` 的残差是度量本身的，对照组同值）。三个独立缺陷：条带未 setback、角补丁 apex 在球面上内凹、角补丁朝向 6/8 朝内。**遗留**：壳仍不是闭合 2-流形（角补丁边界新建了重复顶点/边，76 次边引用单面），不影响体积但会被 `validate_shell_closed` 判不合法 → 下一个缺陷 |
+| C-01 | box 角部材料过度去除（多棱一起圆角时体积塌陷） | **已修**（第六轮体积 + 第九轮拓扑，见 §0''''' 与 §0''''''''）：体积与闭式解一致（`r=0.1/0.5/1/2` 偏差 `0.000 / −0.037 / −0.255 / −1.959`，`r=2` 残差属度量本身）；拓扑亦已闭合 —— 第九轮新增 `blend/src/sew.rs` 焊接重复的顶点/边后，`V=24 E=48 F=26`、`V−E+F=2`、`free=0`，`validate_shell_closed` 接受。**遗留**：结果壳的边 `is_forward` 与面相向仍不自洽（`check_shell_orientation` 报 24 条同向边，第三轮判定为标记层不一致、无几何后果）；`fillet_variable` 与 `chamfer_builder` 两条装配路径尚未接焊接 |
 | C-02 | 混合半径角部开缝 | **无法测**：`try_fillet` 只有单一 `radius`，缺逐棱半径入口 |
 | C-03 | 面片翻转（法向朝内） | **未复现 → 跳过**（第三轮，见 §0'''.2）：解析法向 0/18 朝内 + 体积 975.3 对解析 ≈975.6 |
 | C-04 | 三面角 setback 判定错误 | 待复现 |
