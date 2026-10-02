@@ -86,6 +86,115 @@ pub fn face_polygon(topo: &Topology, face_id: FaceId) -> Result<Vec<Point3>, Che
     wire_polygon(topo, face.outer_wire())
 }
 
+/// The sliver between one chord of a polygonised arc and the arc itself.
+///
+/// A polygon can only approach a curved boundary from one side: the sampled
+/// points lie *on* the arc, so every chord cuts inside it. Polygon and arc
+/// therefore enclose different regions, and they disagree on exactly these
+/// slivers — for a minor arc (which is what sampling produces) the sliver is
+/// the part of the disc lying beyond the chord.
+///
+/// Since the true region and the polygon differ by precisely the union of
+/// these slivers, a containment answer built on the polygon is exact once it
+/// is inverted for a point falling inside one. Carrying the slivers lets the
+/// polygon stay cheap (a few dozen points) while the test stays exact for
+/// circular boundaries — no amount of extra sampling gets there, because the
+/// error is only ever shrunk, never removed.
+#[derive(Debug, Clone, Copy)]
+pub struct ArcBulge {
+    /// Midpoint of the chord.
+    chord_mid: Point3,
+    /// Unit vector from the arc's centre through the chord midpoint.
+    outward: Vec3,
+    center: Point3,
+    radius_sq: f64,
+}
+
+impl ArcBulge {
+    /// The sliver bounded by the chord `a → b` and the arc of `circle`.
+    ///
+    /// Returns `None` when the chord degenerates (it passes through the
+    /// centre, so "beyond the chord" has no meaning) — such a chord stands
+    /// for a semicircle, which sampling at
+    /// [`CLOSED_CURVE_SAMPLES`] never produces.
+    #[must_use]
+    pub fn new(a: Point3, b: Point3, circle: &brepkit_math::curves::Circle3D) -> Option<Self> {
+        let center = circle.center();
+        let chord_mid = Point3::new(
+            (a.x() + b.x()) * 0.5,
+            (a.y() + b.y()) * 0.5,
+            (a.z() + b.z()) * 0.5,
+        );
+        let out = chord_mid - center;
+        let len = out.length();
+        if len < 1e-12 {
+            return None;
+        }
+        Some(Self {
+            chord_mid,
+            outward: out * (1.0 / len),
+            center,
+            radius_sq: circle.radius() * circle.radius(),
+        })
+    }
+
+    /// Whether `p` lies in the sliver: inside the circle, beyond the chord.
+    #[must_use]
+    pub fn contains(&self, p: Point3) -> bool {
+        (p - self.center).length_squared() < self.radius_sq
+            && (p - self.chord_mid).dot(self.outward) > 0.0
+    }
+}
+
+/// One boundary loop of a face: the polygonised loop plus the slivers its
+/// curved edges stand in for.
+#[derive(Debug, Clone)]
+pub struct FaceLoop {
+    /// The sampled loop, in traversal order.
+    pub polygon: Vec<Point3>,
+    /// Slivers between the polygon's chords and the true arcs.
+    pub bulges: Vec<ArcBulge>,
+}
+
+/// Build every boundary loop of a face with its arc slivers: the outer loop
+/// first, then one loop per hole (`inner_wires`).
+///
+/// # Errors
+///
+/// Returns an error if any topology entity referenced by the face is missing.
+pub fn face_boundary_regions(
+    topo: &Topology,
+    face_id: FaceId,
+) -> Result<Vec<FaceLoop>, CheckError> {
+    let face = topo.face(face_id)?;
+    let mut loops = Vec::with_capacity(1 + face.inner_wires().len());
+    loops.push(wire_region(topo, face.outer_wire())?);
+    for &iw in face.inner_wires() {
+        loops.push(wire_region(topo, iw)?);
+    }
+    Ok(loops)
+}
+
+/// Whether `point` lies inside `loop_`, corrected for the loop's curved edges.
+///
+/// Answers [`point_in_polygon_3d`] on the sampled polygon, then inverts the
+/// answer once per sliver the point falls inside. The polygon and the true
+/// loop differ by exactly the slivers, so a point inside one is classified
+/// the wrong way round by the polygon — whether the sliver belongs to the
+/// region (a convex arc, cut off by its chord) or is excluded from it (a
+/// concave arc, closed off by its chord). In both cases inverting is the
+/// correction.
+#[must_use]
+pub fn point_in_loop_3d(point: &Point3, loop_: &FaceLoop, normal: &Vec3) -> bool {
+    let mut inside = point_in_polygon_3d(point, &loop_.polygon, normal);
+    for bulge in &loop_.bulges {
+        if bulge.contains(*point) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 /// Build every boundary loop of a face: the outer loop first, then one loop
 /// per hole (`inner_wires`).
 ///
@@ -125,8 +234,23 @@ pub fn wire_polygon(
     topo: &Topology,
     wire_id: brepkit_topology::wire::WireId,
 ) -> Result<Vec<Point3>, CheckError> {
+    Ok(wire_region(topo, wire_id)?.polygon)
+}
+
+/// Build a wire's polygon together with the slivers its circular edges stand
+/// in for — see [`wire_polygon`] for the traversal rules and [`ArcBulge`] for
+/// why the slivers are needed.
+///
+/// # Errors
+///
+/// Returns an error if any topology entity referenced by the wire is missing.
+pub fn wire_region(
+    topo: &Topology,
+    wire_id: brepkit_topology::wire::WireId,
+) -> Result<FaceLoop, CheckError> {
     let wire = topo.wire(wire_id)?;
     let mut pts: Vec<Point3> = Vec::new();
+    let mut bulges: Vec<ArcBulge> = Vec::new();
     let mut prev_end: Option<brepkit_topology::vertex::VertexId> = None;
 
     for oe in wire.edges() {
@@ -214,6 +338,15 @@ pub fn wire_polygon(
                 }
                 EdgeCurve::Line => vec![],
             };
+            // The sampled points chain head-to-tail around the whole closed
+            // curve, so the last chord closes back onto the first point.
+            if let EdgeCurve::Circle(c) = curve {
+                for i in 0..sampled.len() {
+                    let a = sampled[i];
+                    let b = sampled[(i + 1) % sampled.len()];
+                    bulges.extend(ArcBulge::new(a, b, c));
+                }
+            }
             pts.extend(sampled);
             prev_end = Some(start_vid);
         } else if matches!(curve, EdgeCurve::Line) {
@@ -250,13 +383,23 @@ pub fn wire_polygon(
             {
                 seq.reverse();
             }
+            // `seq` still holds the far endpoint here; it is the last point
+            // of the last sliver, supplied to the polygon by the next edge.
+            if let EdgeCurve::Circle(c) = curve {
+                for w in seq.windows(2) {
+                    bulges.extend(ArcBulge::new(w[0], w[1], c));
+                }
+            }
             seq.pop();
             pts.extend(seq);
             prev_end = Some(if forward { end_vid } else { start_vid });
         }
     }
 
-    Ok(pts)
+    Ok(FaceLoop {
+        polygon: pts,
+        bulges,
+    })
 }
 
 /// Expand an AABB to account for surface curvature that may extend beyond

@@ -17,7 +17,7 @@ use brepkit_topology::face::{FaceId, FaceSurface};
 
 use crate::CheckError;
 use crate::classify::ray_surface;
-use crate::util::{face_boundary_loops, point_in_polygon_3d};
+use crate::util::{FaceLoop, face_boundary_loops, face_boundary_regions, point_in_loop_3d};
 
 /// Minimum positive ray parameter to count as a forward hit.
 const RAY_T_MIN: f64 = 1e-12;
@@ -31,15 +31,17 @@ const COINCIDENT_SQ: f64 = 1e-12;
 /// Whether a 3D hit point lies on the trimmed face.
 ///
 /// `loops` is `[outer, hole…]` as returned by
-/// [`face_boundary_loops`](crate::util::face_boundary_loops): the point must
-/// lie inside the outer loop and outside every hole loop.
-fn hit_in_boundary_3d(hit: &Point3, loops: &[Vec<Point3>], normal: &Vec3) -> bool {
+/// [`face_boundary_regions`](crate::util::face_boundary_regions): the point
+/// must lie inside the outer loop and outside every hole loop. Each loop is
+/// tested with [`point_in_loop_3d`], so a circular boundary is honoured
+/// exactly rather than through the polygon standing in for it.
+fn hit_in_boundary_3d(hit: &Point3, loops: &[FaceLoop], normal: &Vec3) -> bool {
     match loops.split_first() {
         Some((outer, holes)) => {
-            point_in_polygon_3d(hit, outer, normal)
+            point_in_loop_3d(hit, outer, normal)
                 && !holes
                     .iter()
-                    .any(|h| h.len() >= 3 && point_in_polygon_3d(hit, h, normal))
+                    .any(|h| h.polygon.len() >= 3 && point_in_loop_3d(hit, h, normal))
         }
         None => false,
     }
@@ -79,14 +81,14 @@ pub fn point_in_face_boundary(
     face_id: FaceId,
     point: Point3,
 ) -> Result<bool, CheckError> {
-    let loops = face_boundary_loops(topo, face_id)?;
+    let loops = face_boundary_regions(topo, face_id)?;
     let Some(outer) = loops.first() else {
         return Ok(false);
     };
-    if outer.len() < 3 {
+    if outer.polygon.len() < 3 {
         return Ok(true);
     }
-    let normal = polygon_normal(outer);
+    let normal = polygon_normal(&outer.polygon);
     let face = topo.face(face_id)?;
     let normal = if face.is_reversed() { -normal } else { normal };
     Ok(hit_in_boundary_3d(&point, &loops, &normal))
@@ -270,17 +272,17 @@ fn count_3d_polygon_crossings(
         return Ok(0);
     }
 
-    let loops = face_boundary_loops(topo, face_id)?;
-    if loops.first().is_none_or(|outer| outer.len() < 3) {
+    let loops = face_boundary_regions(topo, face_id)?;
+    if loops.first().is_none_or(|outer| outer.polygon.len() < 3) {
         return Ok(0);
     }
-    let mut normal = polygon_normal(&loops[0]);
+    let mut normal = polygon_normal(&loops[0].polygon);
     // If the face is reversed, the surface normal is flipped.
     let face = topo.face(face_id)?;
     if face.is_reversed() {
         normal = -normal;
     }
-    let ref_pt = loops[0][0];
+    let ref_pt = loops[0].polygon[0];
 
     let mut crossings = 0u32;
     for &t in roots {
@@ -392,8 +394,8 @@ fn ray_plane_crossings(
     };
 
     let hit = origin + direction * t;
-    let loops = face_boundary_loops(topo, face_id)?;
-    if loops.first().is_none_or(|outer| outer.len() < 3) {
+    let loops = face_boundary_regions(topo, face_id)?;
+    if loops.first().is_none_or(|outer| outer.polygon.len() < 3) {
         return Ok(0);
     }
 

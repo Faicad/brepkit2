@@ -23,6 +23,7 @@
 | E-05 | 点分类只遍历 outer shell，内腔被判成实体内部 | **已修复** | `point_inside_cavity_is_outside`（判为 Inside）+ 对照 `point_in_shell_wall_is_inside` + winding 版 `point_inside_cavity_is_outside_winding` | `classify_point` / `_winding` / `_robust` 的面集合改为 outer + inner shells；`winding_number` 同步，且单面绕数按"外环 − 各孔洞环"计算 |
 | F-02 | STEP 读 ELLIPSE 丢弃放置轴（长轴方向） | **已修复** | `io/tests/step_rational_ellipse.rs::ellipse_round_trip_preserves_major_axis`（长轴回读为 `(0,1,0)`，应为 45°） | reader 改用 `Ellipse3D::new_with_ref(center, normal, a, b, u_axis)` |
 | F-01 | STEP 写出丢失有理 B 样条权重 | **已修复** | `rational_nurbs_round_trip_preserves_weights`（1/4 圆弧回读半径 1.0346，应为 1.0） | writer 对有理曲线/曲面写出 `RATIONAL_B_SPLINE_*` 复合实体；reader 的权重提取改为从**完整属性串**取 —— 权重段在 knot 段之前，此前只传入 marker 之后的子串，永远取不到权重 |
+| E-04 | 圆边界靠多边形近似 → 边界抖动 | **已修复** | `check/src/classify/mod.rs::ray_through_circular_hole_sliver_is_not_a_crossing`（半径落在 `(cos π/32, 1)` 的月牙带内被判成材料；`r=0.997` 时 720 个角度里 448 个错）+ 反向用例 `ray_through_disc_sliver_is_a_crossing` + 两条对照 | 新增 `util::ArcBulge` / `wire_region` / `face_boundary_regions`：多边形只从内侧逼近弧，差异恰是"弦与弧之间的月牙"，为每条弦记下它，`point_in_loop_3d` 对落在月牙里的点翻转一次判定。3D 判定路径改用 regions；UV 路径（圆柱/圆锥边界在 UV 里是直线）保持原样 |
 | E-02 | 修剪圆柱/圆锥面 bbox 用完整解析范围 | **已修复** | `operations/src/measure/bounding_box.rs::trimmed_cylinder_bbox_respects_arc_bounds`（1/4 圆柱片 `min.x = −1`，应为 0） | 新增 `expand_trimmed_revolution`：由修剪边界采样求出角度跨度（圆弧均值 + 最大偏差）与轴向范围，只补跨度内的基数方向极值点；跨度无法推断时退回整圈采样，保持保守 |
 | E-01 | 体积/面积/质心未计内腔壳 | **未复现 → 跳过** | `cavity_shell_subtracts_volume`（64−8=56）、`cavity_shell_adds_surface_area`（96+24=120） | 本 fork 已在 `measure/helpers.rs` 计入 `inner_shells`，两条测试直接通过；保留为回归护栏 |
 | C-10 | WASM 中 blend panic 杀死整个实例 | **未复现 → 跳过** | — | `wasm/src/bindings/operations.rs:276,332` 与 `batch.rs:812` 已全部包 `catch_unwind` |
@@ -484,6 +485,57 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 ---
 
+## 0''''''''''. 第十一轮实施记录（E-04：圆边界靠多边形近似 → 边界抖动）
+
+### 0''''''''''.1 结果：已修复
+
+平面上的圆形边界（钻孔的孔壁、圆角的圆弧边）此前只以采样多边形的形态参与"点是否在面内"的判定，于是判定结果在真实圆弧附近一整条带状区域内是错的。
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `crates/check/src/classify` 单元测试：`ray_through_circular_hole_sliver_is_not_a_crossing`、`ray_through_disc_sliver_is_a_crossing` + 两条对照 |
+| 量化 | 单位圆被 32 边形逼近，弦的内切半径为 `cos(π/32) = 0.99518`。半径落在 `(0.99518, 1)` 的月牙带内时判定翻转：半径 `0.997` 处 **720 个角度里 448 个判错**，半径 `0.9999` 处 704 个。带内全部错误，带外全部正确 —— 与"弦内切"的几何预测逐点吻合 |
+| 根因 | 采样点落在**弧上**，所以每条弦都从内侧切过圆弧。多边形与真实边界围出的区域不同，差异恰好是"弦与弧之间的月牙"。加密采样只能把带子压窄（`N` 翻倍带子变 1/4），永远压不掉 |
+| 修复 | 不加密采样，而是**补上这块差异**：`wire_region` 在生成多边形的同时，为每条圆边产出它所有弦对应的月牙（`ArcBulge`）；`point_in_loop_3d` 先用多边形判定，点落在月牙里就把结论翻转一次 |
+| 为什么翻转就是精确的 | 多边形与真实环只差这些月牙。月牙属于区域时（外凸弧，弦把它切掉了）点在月牙里 ⟹ 多边形漏判；月牙不属于区域时（内凹弧，弦把它补上了）点在月牙里 ⟹ 多边形多判。两种情形都是翻转。非平凡的圆弧（`≥3` 个采样点，每条弦对应劣弧）保证月牙互不相交，一个点至多落在一个里 |
+| 期望值 | 纯几何不变量：`r < 1` 必在圆内、`r > 1` 必在圆外，360 个角度全扫。不依赖任何数值 golden |
+
+### 0''''''''''.2 走通过的三条岔路（记录在案）
+
+1. **先想加密采样。** 要让月牙窄于顶点容差 `1e-7`，单位圆需要约 `π/√(2·1e-7) ≈ 7000` 个采样点，而 `face_boundary_loops` 是"每条射线 × 每个面"都要调一次的热路径。**加密采样在这条路径上不可行**，这也是必须走解析补正的原因。
+2. **一度想写"射线 × 弧"的通用解析求交。** 能做，但要处理射线过弧端点、相切、多值等退化情形，且 `point_in_polygon_3d` 用的是绕数而非奇偶，改判据会牵动所有调用方。月牙补正把问题压到"点是否在一个圆盘 ∩ 半空间里"，两个点积即可判定。
+3. **椭圆没做。** `ArcBulge` 只覆盖 `EdgeCurve::Circle`。椭圆的月牙是椭圆弓形而非圆弓形，需要 `Ellipse3D` 的轴访问器；`EdgeCurve::NurbsCurve`（布尔交线常常是它）没有解析形式，只能保持近似。这两类回退到多边形，行为与修复前一致，不是新引入的错误。
+
+### 0''''''''''.3 改动边界
+
+只动了 3D 判定那条路（`ray_plane_crossings` / `count_3d_polygon_crossings` / `point_in_face_boundary`），即平面上的面 —— 钻孔板、带圆角边的平面正是 E-04 的点名对象。
+
+走 UV 判定的两条路（`count_analytic_crossings`、`ray_crossings_nurbs`）保持用 `face_boundary_loops` 的多边形：圆柱/圆锥的修剪边界在 UV 里是直线（圆弧 → `u` 或 `v` 为常数），多边形化在那里本来就是精确的。球面/环面上由非解析交线产生的孔仍有近似误差，属 E-04 的残余。
+
+### 0''''''''''.4 留给后续
+
+| 项 | 说明 |
+|----|------|
+| `crates/algo/src/classifier/ray_cast.rs::planar_face_polygons` | 布尔引擎里有一份**独立实现**的同名判定，同样是多边形近似。本轮未动（algo 改动属 Phase 2 范围，风险面不同），但 E-04 在那里同样成立 |
+| 椭圆边 / NURBS 边 | 见 §0''''''''''.2 第 3 条，仍为近似 |
+| `face_integrator` 用 `face_polygon` | 只取外环，**面的孔不参与面积积分**（带孔板的面积会多算孔的面积）。与 E-04 同源于"用多边形代替边界"，但是独立缺陷，未在本轮处理 |
+
+### 0''''''''''.5 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证 | 把 `point_in_loop_3d` 的翻转临时置为 `if false && …` → 两条主用例转红，两条对照仍绿；恢复后转绿。测试确实锁定该缺陷 |
+| `cargo test -p brepkit-check` | ✅ 58 passed（含 4 条新用例与既有 E-03/E-05 用例） |
+| `cargo test -p brepkit-algo` | ✅ 209 passed（algo 有自己的一份分类器，不受影响） |
+| `cargo test -p brepkit-operations` | ✅ 814 库测试 + 全部集成测试通过，7 ignored |
+| `cargo clippy -p brepkit-check -p brepkit-math --all-targets` | ✅ 零告警 |
+| `cargo fmt --all -- --check` | ✅ 本轮改动文件均干净 |
+| `scripts/check-boundaries.sh` | ✅ All crate boundaries valid |
+
+改动文件：`crates/check/src/util.rs`（`ArcBulge` / `FaceLoop` / `wire_region` / `face_boundary_regions` / `point_in_loop_3d`，`wire_polygon` 改为转发）、`crates/check/src/classify/boundary.rs`（3D 判定改用 regions）、`crates/check/src/classify/mod.rs`（4 条测试）。`crates/math` 无需改动 —— `Circle3D::center/radius/normal` 访问器已存在。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -565,7 +617,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 | E-01 | 体积/面积/质心**未计入内腔壳** → 空心体数值错误 | **疑似已修**：`measure/helpers.rs:19,53` 已 `chain(inner_shells)`，需确认 volume/area/centroid 三条路径全部走 helper |
 | E-02 | 修剪过的圆柱/圆锥面 bbox 用完整解析面范围 → 过估 | **部分修**：`bounding_box.rs:159-168` 用顶点+wire 中点扩张，非按 edge 边界裁剪，仍可能过估 |
 | E-03 | ray-cast 分类：射线穿过**面孔（洞）**仍算一次穿越 → 内外判定反 | **已确认**：`check/src/util.rs:84-87` `face_polygon` 只取 `outer_wire`，完全忽略 `inner_wires` |
-| E-04 | 圆孔缺少解析命中测试（依赖多边形化，边界抖动） | 待复现 |
+| E-04 | 圆孔缺少解析命中测试（依赖多边形化，边界抖动） | **已修复**（第十一轮，见 §0''''''''''）：平面上的圆边界此前只以 32 边形参与判定，半径落在 `(cos π/32, 1)` 的月牙带内判定翻转（`r=0.997` 时 720 角度中 448 个错）。改为多边形照旧、但为每条弦补记"弦与弧之间的月牙"，点落在月牙里就翻转一次 —— 加密采样不可行（压到顶点容差需 ~7000 点/圆，而这是每射线每面的热路径）。**残余**：椭圆边与 NURBS 边仍为近似；`crates/algo` 里有一份独立实现（`planar_face_polygons`）同样未修 |
 | E-05 | 点分类只遍历 `outer_shell` | **已确认**：`check/src/classify/mod.rs:65` |
 
 ### F. IO（crates/io）

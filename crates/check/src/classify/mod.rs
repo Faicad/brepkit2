@@ -503,6 +503,121 @@ mod tests {
         );
     }
 
+    // ── E-04: circular boundaries are honoured exactly, not by their chords ─
+
+    /// A disc of radius `r` in the `z = 0` plane, centred at the origin: a
+    /// single closed circular edge bounding the face.
+    fn make_disc_face(topo: &mut Topology, r: f64) -> FaceId {
+        let circle =
+            Circle3D::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), r).unwrap();
+        let seam = topo.add_vertex(Vertex::new(circle.evaluate(0.0), 1e-7));
+        let circle_edge = topo.add_edge(Edge::new(seam, seam, EdgeCurve::Circle(circle)));
+        let outer =
+            topo.add_wire(Wire::new(vec![OrientedEdge::new(circle_edge, true)], true).unwrap());
+        topo.add_face(Face::new(
+            outer,
+            vec![],
+            FaceSurface::Plane {
+                normal: Vec3::new(0.0, 0.0, 1.0),
+                d: 0.0,
+            },
+        ))
+    }
+
+    /// A radius inside the sliver between a polygonised unit circle and the
+    /// circle itself, derived from the sampling rate so the test still aims
+    /// at the sliver if that rate changes.
+    ///
+    /// The sampled points lie *on* the circle, so the polygon's inradius is
+    /// `cos(pi / N)`; the sliver is everything between that and 1.
+    fn sliver_radius() -> f64 {
+        let inradius = (std::f64::consts::PI / crate::util::CLOSED_CURVE_SAMPLES as f64).cos();
+        inradius + (1.0 - inradius) * 0.95
+    }
+
+    /// Straight up through the sliver of a circular hole: the hit is inside
+    /// the hole, so the annulus must not block the ray — at every angle.
+    ///
+    /// The hole reaches the test through a 32-gon standing in for the circle,
+    /// and that polygon cuts inside it. Every point in the sliver therefore
+    /// reads as material, and a ray down a bore is counted as a crossing
+    /// that does not exist.
+    #[test]
+    fn ray_through_circular_hole_sliver_is_not_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_annulus_face(&mut topo, 1.0);
+        let radius = sliver_radius();
+
+        for i in 0..360 {
+            let ang = std::f64::consts::TAU * (i as f64) / 360.0;
+            let origin = Point3::new(2.0 + radius * ang.cos(), 2.0 + radius * ang.sin(), -1.0);
+            let n =
+                boundary::count_face_ray_crossings(&topo, face, origin, Vec3::new(0.0, 0.0, 1.0))
+                    .unwrap();
+            assert_eq!(
+                n, 0,
+                "radius {radius} at {ang:.4} rad is inside the hole (r < 1), \
+                 so it must not count as a crossing"
+            );
+        }
+    }
+
+    /// Control: just outside the same hole the annulus is material and does
+    /// block the ray.
+    #[test]
+    fn ray_just_outside_circular_hole_is_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_annulus_face(&mut topo, 1.0);
+
+        for i in 0..36 {
+            let ang = std::f64::consts::TAU * (i as f64) / 36.0;
+            let origin = Point3::new(2.0 + 1.001 * ang.cos(), 2.0 + 1.001 * ang.sin(), -1.0);
+            let n =
+                boundary::count_face_ray_crossings(&topo, face, origin, Vec3::new(0.0, 0.0, 1.0))
+                    .unwrap();
+            assert_eq!(n, 1, "radius 1.001 > 1 is material at {ang:.4} rad");
+        }
+    }
+
+    /// The same sliver on a convex boundary, where it *is* material: a disc
+    /// bounded by one circular edge. The chord clips the disc's rim, so the
+    /// sliver used to read as outside the face.
+    #[test]
+    fn ray_through_disc_sliver_is_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_disc_face(&mut topo, 1.0);
+        let radius = sliver_radius();
+
+        for i in 0..360 {
+            let ang = std::f64::consts::TAU * (i as f64) / 360.0;
+            let origin = Point3::new(radius * ang.cos(), radius * ang.sin(), -1.0);
+            let n =
+                boundary::count_face_ray_crossings(&topo, face, origin, Vec3::new(0.0, 0.0, 1.0))
+                    .unwrap();
+            assert_eq!(
+                n, 1,
+                "radius {radius} at {ang:.4} rad is inside the disc (r < 1), \
+                 so it must count as a crossing"
+            );
+        }
+    }
+
+    /// Control: outside the disc the ray misses.
+    #[test]
+    fn ray_outside_disc_is_not_a_crossing() {
+        let mut topo = Topology::new();
+        let face = make_disc_face(&mut topo, 1.0);
+
+        for i in 0..36 {
+            let ang = std::f64::consts::TAU * (i as f64) / 36.0;
+            let origin = Point3::new(1.001 * ang.cos(), 1.001 * ang.sin(), -1.0);
+            let n =
+                boundary::count_face_ray_crossings(&topo, face, origin, Vec3::new(0.0, 0.0, 1.0))
+                    .unwrap();
+            assert_eq!(n, 0, "radius 1.001 > 1 is outside the disc at {ang:.4} rad");
+        }
+    }
+
     // ── E-05: cavity (inner) shells participate in classification ───────
 
     /// A point in the cavity of a hollow cube is OUTSIDE the material.
