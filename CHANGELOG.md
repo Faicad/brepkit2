@@ -12,3 +12,9 @@ and the original copyright notices. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
 ## [Unreleased]
+
+## [2.129.16] - 2026-10-02
+
+### Fixed
+- let a contact line trim through an existing boundary vertex (42539e2)
+- give fillet_v2 the correct box-fillet volume (3d8743e)
