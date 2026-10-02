@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790822173358,
+  "lastUpdate": 1790901396435,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -593,6 +593,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24947819,
             "range": "± 196765",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "3d8743e124d1d595b2fc5513ca3edf9380c2e093",
+          "message": "fix(blend): give fillet_v2 the correct box-fillet volume\n\nC-01, engine half. On a 10^3 cube with all 12 edges filleted the walking\nengine now reproduces Steiner's closed form at every radius:\n\n    r      closed    before      after\n    0.1   999.744   (no datum)  999.744\n    0.5   993.729    977.163    993.692\n    1.0   975.587    912.675    975.332\n    2.0   907.705    690.772    905.746\n\nThe r=2 residual of -1.959 belongs to the ruler, not the geometry:\nfillet_rolling_ball, a separate solver, measures 905.7461 under the same\ndeflection against fillet_v2's 905.7464.\n\nThree independent defects, all fixed here:\n\n1. Stripes spanned the whole edge. A stripe must stop one radius short of\n   each end at a vertex where three or more filleted edges meet, because the\n   spherical corner patch owns that material. New `setback` module solves the\n   hold-back analytically -- the ball tangent to the two adjacent faces sits\n   at w = r (n1+n2)/(1+n1.n2) and its clearance from a third face varies\n   linearly along the edge, so the setback is (r - w.n3)/(u.n3) -- and\n   `Spine::window` restricts a stripe to the surviving sub-interval. Fewer\n   than three filleted edges at a vertex gets no setback: no corner patch is\n   coming to take that material over.\n\n2. The corner patch's interior control point sat on the rolling-ball sphere.\n   A degree-(2,2) rational patch over a wide spherical triangle then sags\n   inward across its middle: sampled at (0.5,0.5) it lay 13.5% of R inside\n   the sphere, gouging material out of the corner. Moving the apex to the\n   tangent-cone apex (the un-normalised sum of the unit radial directions,\n   which overshoots by sqrt(3) for an orthogonal corner and lands exactly on\n   the box corner) brings all eight patches onto the same surface the\n   rolling-ball engine already used.\n\n3. Corner patches came out wound the wrong way: 6 of 8 had their tessellated\n   normals pointing into the material, against 0 of 8 in the control engine.\n   `VertexContactData::is_convex` selects vertex -/+ sum(normals)*r in\n   `compute_sphere_center`, and it reports false for all eight of these\n   convex corners, so reading it as \"is convex\" when picking the outward\n   direction inverted the answer. The flag now drives the radial sign\n   consistently, and the face carries the result in its `reversed` flag,\n   which both the tessellator and the volume integral follow. The test is the\n   (u,v) grid cross product rather than `surface.normal`, because a\n   tensor-product patch whose control grid is transposed disagrees with its\n   own parametric normal while the tessellator walks the grid.\n\nEach fix was verified by disabling it: without the orientation correction the\nvolume returns to exactly 912.6748 at r=1, with the on-sphere apex r=2 is\n5.78 off, and without the setback the bands span the full edge again.\n\nTwo of the box tickets in tests/fillet_box_volume.rs graduate from ignored to\nenforced, and two in regress_fillet_cascade stop being tickets. Those two\nasserted the volume stayed within 1.0 of the un-filleted 1000 -- an\nexpectation no correct engine can meet (a box fillet loses\n2.5752*(lx+ly+lz)*r^2, 24.4 at r=1) -- so they now assert the closed form.\n\nRemaining, documented but not fixed: the shell is still not a closed\n2-manifold. `corner::compute_corners` mints fresh vertices and edges for each\npatch boundary instead of sharing the stripe ends' arcs, so 76 edge-uses in\nthe r=1 result have a single face (control engine: 0). The volume is\nunaffected, but validate_shell_closed rejects it, which is what keeps the\nwasm cascade from accepting fillet_v2.\n\nblend: 99 tests pass. operations: 1033 tests pass. clippy --all-targets\nclean, check-boundaries.sh clean.",
+          "timestamp": "2026-10-02T08:33:39+08:00",
+          "tree_id": "9873ac1fa03790e4a1d18c8251262021ffc9fb17",
+          "url": "https://github.com/Faicad/brepkit2/commit/3d8743e124d1d595b2fc5513ca3edf9380c2e093"
+        },
+        "date": 1790901395753,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 507817,
+            "range": "± 5518",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 555500,
+            "range": "± 1607",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 6872,
+            "range": "± 384",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 373209,
+            "range": "± 1049",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 15160336,
+            "range": "± 422191",
             "unit": "ns/iter"
           }
         ]
