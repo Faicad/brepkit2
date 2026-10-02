@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790901396435,
+  "lastUpdate": 1790933131926,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -647,6 +647,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 15160336,
             "range": "± 422191",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "8292ca9fbfbdb285487d6a665e202c366750af41",
+          "message": "chore(release): v2.129.16\n\nAuto-computed from git history: two blend fixes (42539e2, 3d8743e) ->\npatch bump. CHANGELOG block generated under Keep a Changelog format;\npublished to npm as @faicad/brepkit2-wasm@2.129.16 (tag: next).",
+          "timestamp": "2026-10-02T17:22:28+08:00",
+          "tree_id": "fb8f417daa218568c2f618cbe5d504b6b56085d3",
+          "url": "https://github.com/Faicad/brepkit2/commit/8292ca9fbfbdb285487d6a665e202c366750af41"
+        },
+        "date": 1790933131005,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 946018,
+            "range": "± 5816",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1028917,
+            "range": "± 16171",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11844,
+            "range": "± 414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 705957,
+            "range": "± 13355",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24821336,
+            "range": "± 138079",
             "unit": "ns/iter"
           }
         ]
