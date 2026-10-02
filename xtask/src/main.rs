@@ -1,3 +1,4 @@
+mod release;
 mod wasm;
 
 use clap::{Parser, Subcommand};
@@ -32,6 +33,26 @@ enum Command {
         #[arg(long)]
         no_simd: bool,
     },
+
+    /// Compute the next version from git history, bump the crate, and publish.
+    WasmRelease {
+        /// Run npm publish with --dry-run.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Disable SIMD optimizations (simd128 is enabled by default).
+        #[arg(long)]
+        no_simd: bool,
+
+        /// Allow a breaking change to bump the major version. Default clamps
+        /// major to minor because the fork inherits upstream's version line.
+        #[arg(long)]
+        allow_major: bool,
+
+        /// Override the computed version with an explicit X.Y.Z.
+        #[arg(long)]
+        version: Option<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -57,6 +78,20 @@ fn main() -> anyhow::Result<()> {
             wasm::validate_output()?;
             wasm::run_smoke_test()?;
             wasm::publish(dry_run)?;
+        }
+        Command::WasmRelease {
+            dry_run,
+            no_simd,
+            allow_major,
+            version,
+        } => {
+            wasm::check_tools()?;
+            release::run_release(wasm::RunReleaseOpts {
+                dry_run,
+                simd: !no_simd,
+                allow_major,
+                version,
+            })?;
         }
     }
 

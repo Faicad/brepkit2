@@ -9,6 +9,19 @@ use std::process::Command;
 /// this fork publishes under its own scope.
 const NPM_PKG_NAME: &str = "@faicad/brepkit2-wasm";
 
+/// Workspace-relative path of the WASM crate manifest. Single source of truth
+/// for the npm package version; shared with `release.rs` for version bumping
+/// and git-history baseline detection.
+pub(crate) const WASM_MANIFEST_PATH: &str = "crates/wasm/Cargo.toml";
+
+/// Options for the `wasm-release` flow, forwarded from `main.rs`.
+pub(crate) struct RunReleaseOpts {
+    pub(crate) dry_run: bool,
+    pub(crate) simd: bool,
+    pub(crate) allow_major: bool,
+    pub(crate) version: Option<String>,
+}
+
 /// Minimum number of exported methods expected in the .d.ts file.
 /// Based on ~185 methods in the current BrepKernel. Update when the API surface
 /// changes significantly.
@@ -598,7 +611,7 @@ mod tests {
     fn required_version_matches_workspace_pin() {
         let version = required_wasm_bindgen_version().unwrap();
         assert_eq!(
-            version, "0.2.126",
+            version, "0.2.128",
             "workspace Cargo.toml pin changed; update this test"
         );
     }
