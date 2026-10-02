@@ -334,6 +334,31 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 ---
 
+## 0'''''''. 第八轮实施记录（D-04：pipe 采样未映射进路径 domain）
+
+### 0'''''''.1 结果：已修复
+
+| 项 | 内容 |
+|----|------|
+| 复现 | `pipe.rs::tests::pipe_covers_full_nonunit_path_domain` —— 单位正方形 profile 沿 knot 域 `[0,2]` 的直线路径（z 0→4）扫掠，体积实测 **2.0**，解析值应为 **4.0**；对照用例 `pipe_path_domain_unit_control`（knot 域 `[0,1]`、z 0→2，体积 2.0）全程绿，证明夹具无误 |
+| 根因 | `pipe` 的采样循环把 `t_param = k/num_segments ∈ [0,1]` 直接喂给 `NurbsCurve::evaluate(u)`，而后者按 **knot 域参数**求值（`basis::find_span(n, p, u, &knots)`）。路径 knot 向量非 `[0,…,1]` 时（如 `[0,0,2,2]`），只扫过路径前半段 |
+| 修复 | `crates/operations/src/pipe.rs` 三处采样全部改为映射到各自曲线的 `domain()`：① 主环循环（新增 `path_param(k)` 闭包，把 `k/num_segments` 映射到路径 knot 域）；② 内环（inner wire）循环同步；③ `compute_scale_factors` 中 guide 与 path 各自映射到自己的域再取距离 |
+| 期望值 | 解析解：体积 = profile 面积（1）× 路径长（4）= 4，容差 0.05；期望值不引用任何外部数值 |
+
+### 0'''''''.2 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 修复前 | 主用例红（体积 2.0 ≠ 4.0），对照绿 |
+| `cargo test -p brepkit-operations --lib pipe::` | 11 项全通过（修复后主用例转绿） |
+| `cargo test -p brepkit-operations` | 814 库测试 + 全部集成测试通过 |
+| `cargo clippy -p brepkit-operations --all-targets` | 零告警 |
+| `scripts/check-boundaries.sh` | 通过（需用 Git Bash 显式执行，见第七轮注） |
+
+改动文件：`crates/operations/src/pipe.rs`（实现 + 两条新测试）。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |

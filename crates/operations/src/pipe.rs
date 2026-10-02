@@ -97,6 +97,16 @@ pub fn pipe(
     let num_segments = (path.control_points().len() * 2).max(4);
     let scale_factors = compute_scale_factors(path, guide, num_segments, tol)?;
 
+    // `NurbsCurve::evaluate` takes knot-domain parameters, so map the
+    // uniform sample k/num_segments from [0,1] into the path's domain
+    // (paths built with non-unit knot vectors would otherwise be piped
+    // only partially).
+    let (path_domain_min, path_domain_max) = path.domain();
+    let path_domain_span = path_domain_max - path_domain_min;
+    let path_param = |k: usize| -> f64 {
+        path_domain_min + path_domain_span * (k as f64) / (num_segments as f64)
+    };
+
     let initial_tangent = path_tangent_0;
     let initial_up = orthogonalize(input_normal, initial_tangent);
     let initial_right = initial_tangent.cross(initial_up);
@@ -105,8 +115,7 @@ pub fn pipe(
         Vec::with_capacity(num_segments + 1);
 
     for (k, &scale) in scale_factors.iter().enumerate() {
-        #[allow(clippy::cast_precision_loss)]
-        let t_param = (k as f64) / (num_segments as f64);
+        let t_param = path_param(k);
 
         let origin = path.evaluate(t_param);
         let tangent = path.tangent(t_param)?;
@@ -149,8 +158,7 @@ pub fn pipe(
             Vec::with_capacity(num_segments + 1);
 
         for (k, &scale) in scale_factors.iter().enumerate() {
-            #[allow(clippy::cast_precision_loss)]
-            let t_param = (k as f64) / (num_segments as f64);
+            let t_param = path_param(k);
             let origin = path.evaluate(t_param);
             let tangent = path.tangent(t_param)?;
             let up = orthogonalize(initial_up, tangent);
@@ -373,11 +381,19 @@ fn compute_scale_factors(
         });
     }
 
+    // Map k/num_segments from [0,1] into each curve's own knot domain
+    // (evaluate takes knot-domain parameters).
+    let (path_min, path_max) = path.domain();
+    let (guide_min, guide_max) = guide.domain();
+    let (path_span, guide_span) = (path_max - path_min, guide_max - guide_min);
+
     let mut factors = Vec::with_capacity(num_segments + 1);
     for k in 0..=num_segments {
         #[allow(clippy::cast_precision_loss)]
-        let t = (k as f64) / (num_segments as f64);
-        let dist = (guide.evaluate(t) - path.evaluate(t)).length();
+        let f = (k as f64) / (num_segments as f64);
+        let dist = (guide.evaluate(guide_min + guide_span * f)
+            - path.evaluate(path_min + path_span * f))
+        .length();
         factors.push(dist / initial_dist);
     }
 
@@ -614,6 +630,52 @@ mod tests {
         assert!(
             vol > 85.0 && vol < 110.0,
             "non-planar pipe volume out of expected range, got {vol}"
+        );
+    }
+
+    /// D-04 control: path with the default [0,1] knot domain pipes the full
+    /// length. Volume = profile area x path length, both analytic.
+    #[test]
+    fn pipe_path_domain_unit_control() {
+        let mut topo = Topology::new();
+        let face = make_unit_square_face(&mut topo);
+        // Straight path z 0->2, knot domain [0,1].
+        let path = straight_z_path(2.0);
+
+        let solid = pipe(&mut topo, face, &path, None).unwrap();
+        let vol = crate::measure::solid_volume(&topo, solid, 0.1).unwrap();
+        assert!(
+            (vol - 2.0).abs() < 0.05,
+            "control: [0,1]-domain path should sweep the full length, got {vol}"
+        );
+    }
+
+    /// D-04 repro: `pipe` samples the path at t = k/num_segments in [0,1],
+    /// but `NurbsCurve::evaluate` takes knot-domain parameters. A path whose
+    /// knot domain is [0,2] only gets its first half piped.
+    #[test]
+    fn pipe_covers_full_nonunit_path_domain() {
+        let mut topo = Topology::new();
+        let face = make_unit_square_face(&mut topo);
+        // Straight path z 0->4, knot domain [0,2]. Analytic volume = 1 x 4.
+        let path = NurbsCurve::new(
+            1,
+            vec![0.0, 0.0, 2.0, 2.0],
+            vec![Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 4.0)],
+            vec![1.0, 1.0],
+        )
+        .unwrap();
+        let (u_min, u_max) = path.domain();
+        assert!(
+            (u_max - u_min - 2.0).abs() < 1e-12,
+            "fixture must have non-unit domain, got [{u_min}, {u_max}]"
+        );
+
+        let solid = pipe(&mut topo, face, &path, None).unwrap();
+        let vol = crate::measure::solid_volume(&topo, solid, 0.1).unwrap();
+        assert!(
+            (vol - 4.0).abs() < 0.05,
+            "pipe must cover the full path domain [0,2] (length 4), got volume {vol}"
         );
     }
 }
