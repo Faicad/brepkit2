@@ -465,7 +465,12 @@ impl StepWriteContext {
                 self.write_entity(
                     id,
                     "CONICAL_SURFACE",
-                    &format!("'', #{axis}, 0.0E0, {:.15E})", cone.half_angle()),
+                    // STEP semi-angle is measured from the axis; our internal
+                    // half_angle is measured from the radial plane (complementary).
+                    &format!(
+                        "'', #{axis}, 0.0E0, {:.15E})",
+                        std::f64::consts::FRAC_PI_2 - cone.half_angle()
+                    ),
                 );
                 id
             }
@@ -930,6 +935,69 @@ mod tests {
             step_str.contains("CONICAL_SURFACE"),
             "STEP export should contain CONICAL_SURFACE entity"
         );
+    }
+
+    /// STEP semi-angle must be measured from the axis (ISO 10303), not from
+    /// the radial plane. For make_cone(1, 0, 2) the generator rises 2 over a
+    /// radius 1, so the axis semi-angle is atan(1/2) ≈ 0.4636.
+    #[test]
+    fn step_cone_semi_angle_measured_from_axis() {
+        let mut topo = Topology::new();
+        let solid = brepkit_operations::primitives::make_cone(&mut topo, 1.0, 0.0, 2.0).unwrap();
+
+        let step_str = write_step(&topo, &[solid]).unwrap();
+
+        let expected = (1.0f64 / 2.0).atan();
+        let line = step_str
+            .lines()
+            .find(|l| l.contains("= CONICAL_SURFACE("))
+            .expect("cone step should contain CONICAL_SURFACE");
+        let semi_angle: f64 = line
+            .rsplit(',')
+            .next()
+            .and_then(|s| {
+                s.trim_end_matches(");")
+                    .trim()
+                    .replace('E', "e")
+                    .parse()
+                    .ok()
+            })
+            .expect("CONICAL_SURFACE last parameter should be a float");
+        assert!(
+            (semi_angle - expected).abs() < 1e-9,
+            "STEP semi-angle {semi_angle} should be measured from the axis ({expected})"
+        );
+    }
+
+    /// Writing then reading back a cone must preserve the geometry: the
+    /// reader converts the STEP axis semi-angle back to the internal
+    /// radial-plane angle.
+    #[test]
+    fn step_cone_round_trip_preserves_semi_angle() {
+        use crate::step::reader::read_step;
+
+        let mut topo = Topology::new();
+        let solid = brepkit_operations::primitives::make_cone(&mut topo, 1.0, 0.0, 2.0).unwrap();
+        let step_str = write_step(&topo, &[solid]).unwrap();
+
+        let mut rt = Topology::new();
+        let solids = read_step(&step_str, &mut rt).unwrap();
+        assert_eq!(solids.len(), 1);
+
+        let mut found = false;
+        for fid in brepkit_topology::explorer::solid_faces(&rt, solids[0]).unwrap() {
+            if let brepkit_topology::face::FaceSurface::Cone(cone) =
+                rt.face(fid).unwrap().surface().clone()
+            {
+                found = true;
+                let expected = (1.0f64 / 2.0).atan();
+                assert!(
+                    (std::f64::consts::FRAC_PI_2 - cone.half_angle() - expected).abs() < 1e-9,
+                    "round-tripped axis semi-angle mismatch"
+                );
+            }
+        }
+        assert!(found, "round-tripped solid should contain a cone face");
     }
 
     #[test]

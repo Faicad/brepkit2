@@ -265,10 +265,13 @@ impl<'a> StepBuilder<'a> {
                     reason: format!("CONICAL_SURFACE #{surface_ref} missing axis"),
                 })?;
                 // STEP: CONICAL_SURFACE('', #axis, base_radius, half_angle)
-                // half_angle is in radians in STEP AP203.
-                let half_angle = floats.last().copied().ok_or_else(|| IoError::ParseError {
-                    reason: format!("CONICAL_SURFACE #{surface_ref} missing half_angle"),
-                })?;
+                // STEP half_angle is measured from the axis; our internal
+                // half_angle is measured from the radial plane (complementary).
+                let step_semi_angle =
+                    floats.last().copied().ok_or_else(|| IoError::ParseError {
+                        reason: format!("CONICAL_SURFACE #{surface_ref} missing half_angle"),
+                    })?;
+                let half_angle = std::f64::consts::FRAC_PI_2 - step_semi_angle;
                 let (apex, axis, _ref_dir) = self.build_axis2_placement(axis_ref)?;
                 let cone = brepkit_math::surfaces::ConicalSurface::new(apex, axis, half_angle)
                     .map_err(|e| IoError::ParseError {

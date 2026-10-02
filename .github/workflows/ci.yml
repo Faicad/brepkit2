@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly kernel-compat run (Saturday 03:00 UTC)
+    - cron: "0 3 * * 6"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -205,6 +208,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: ./scripts/check-boundaries.sh
 
+  # STEP cross-kernel consistency gate: brepkit2 (locally built WASM) vs
+  # occt-wasm. Only runs on main pushes / weekly schedule; occt-wasm is
+  # installed ad hoc here and is NOT a project dependency.
+  kernel-compat:
+    name: Kernel Compat (OCCT STEP)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2.62.30
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build brepkit2 WASM
+        run: cargo xtask wasm-build --skip-opt
+      - name: Install occt-wasm (test-only)
+        run: npm install --no-save --prefix "$HOME/occt-wasm-deps" occt-wasm@3.8.4
+      - name: Run cross-kernel comparison
+        run: OCCT_WASM_DIR="$HOME/occt-wasm-deps" node scripts/compare-occt.mjs ./tmp/compare-occt
+
   doc-paths:
     name: Doc Paths
     runs-on: ubuntu-latest
@@ -268,7 +297,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [fmt, clippy, test, coverage, msrv, wasm, boundaries, deny, audit, docs, machete, taplo]
+    needs: [fmt, clippy, test, coverage, msrv, wasm, boundaries, kernel-compat, deny, audit, docs, machete, taplo]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
