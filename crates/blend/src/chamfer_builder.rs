@@ -319,9 +319,25 @@ impl<'a> ChamferBuilder<'a> {
         // quad is individually closed, which is why the shell reads as 18
         // disconnected pieces rather than one shell with holes.
         //
-        // The fix is to build the corner patches, not to weld. See
-        // `crates/operations/tests/chamfer_shell_manifold.rs`, which pins both
-        // the defect and the control engine that gets F = 26 / free = 0 right.
+        // Calling `corner::compute_corners` here is NOT the fix, though it is
+        // the obvious next thing to try. Measured: it gets the face count right
+        // (18 -> 26, the 8 corner faces do appear) and the shell still does not
+        // close — `V/E/F = 100/96/26, free = 96, components = 26`, slightly
+        // worse than before. `corner.rs` routes 3+ stripe vertices to
+        // `spherical_triangle`, documented as "rolling-ball sphere" and
+        // "great-circle arcs" on a "Fillet radius"; a chamfer corner is a flat
+        // triangle, and a spherical patch's boundary arcs do not land on the
+        // straight contact lines of the faces it must meet. It also leans on
+        // `CircSection`, which `analytic.rs` fills with a chord half-length
+        // while noting the struct "is shaped for fillets".
+        //
+        // What the fix needs instead is a chamfer-specific corner patch: a
+        // plane through the three contact points, one per corner, with edges
+        // shared against the two adjacent bevels and the side face. See
+        // `crates/operations/tests/chamfer_corner_patches.rs`, whose
+        // `the_spherical_corner_path_is_wrong_for_chamfer` records the
+        // experiment above, and `chamfer_shell_manifold.rs`, which pins the
+        // defect against a control engine that reaches F = 26 / free = 0.
         let new_shell = Shell::new(result_faces)?;
         let new_shell_id = topo.add_shell(new_shell);
         let new_solid = Solid::new(new_shell_id, Vec::new());

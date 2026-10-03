@@ -58,6 +58,15 @@
 //! while sharing no edge with any neighbour. That file also carries the
 //! control case that keeps the expectations honest, and documents what to do
 //! with the numbers when the corner patches land.
+//!
+//! One thing already ruled out by measurement, so it needn't be retried:
+//! calling `corner::compute_corners` here, the way `fillet_builder` does. It
+//! produces the 8 corner faces and the right face count, but they come out as
+//! NURBS spherical patches rather than flat triangles, and the shell does not
+//! close — `free = 96` of 96 edges, 26 components. The corner patch a chamfer
+//! needs is a plane through the three contact points, built by
+//! chamfer-specific code. See
+//! `the_spherical_corner_path_is_wrong_for_chamfer` in the sibling file.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
 

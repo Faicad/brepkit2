@@ -46,6 +46,26 @@
 //! The consequence is a hard boundary on where the fix may live: the corner
 //! faces have to be *built*. No amount of deduplicating what is already there
 //! will close this shell.
+//!
+//! # The fix is NOT `corner::compute_corners` as-is
+//!
+//! The obvious move is to call the fillet builder's corner routine. Measured:
+//! wiring it in unchanged gets the face COUNT right (18 -> 26, the 8 corner
+//! patches appear) and the shell still does not close, at
+//! `V/E/F = 100/96/26, free = 96, components = 26`. It is slightly worse than
+//! before: 26 isolated pieces rather than 18.
+//!
+//! The reason is that the two corners are different geometry. `corner.rs`
+//! routes 3+ stripe vertices to `spherical_triangle`, documented as
+//! "rolling-ball sphere", "great-circle arcs", "Fillet radius" — a chamfer
+//! corner is a flat triangle, and a spherical patch's boundary arcs do not
+//! coincide with the straight contact lines on the adjacent faces. It also
+//! leans on `CircSection`, which `analytic.rs` says outright it is filling with
+//! a chord half-length because "CircSection is shaped for fillets".
+//!
+//! `the_spherical_corner_path_is_wrong_for_chamfer` below is the standing
+//! record of that experiment, so nobody re-runs it. The corner patch chamfer
+//! needs is a plane through the three contact points.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
 
@@ -56,6 +76,7 @@ use brepkit_operations::chamfer::chamfer;
 use brepkit_operations::primitives::make_box;
 use brepkit_topology::Topology;
 use brepkit_topology::explorer::solid_edges;
+use brepkit_topology::face::FaceSurface;
 use brepkit_topology::solid::SolidId;
 
 /// Cube side used throughout.
@@ -467,6 +488,109 @@ fn side_count_reads_the_outer_wire() {
             side_count(&topo, fid),
             direct,
             "side_count must agree with a direct read of the outer wire"
+        );
+    }
+}
+
+// ── Why the fillet corner path is the wrong one for chamfer ───────────────
+
+/// Surface census of the current chamfer result: all planes, no NURBS.
+///
+/// This is the baseline the experiment below is read against. `chamfer_v2`
+/// produces flat geometry today; a fix that introduces NURBS faces into the
+/// corner is building something a chamfer should not have.
+#[test]
+fn chamfer_result_is_all_planar_today() {
+    for &d in &DISTANCES {
+        let mut topo = Topology::new();
+        let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
+        let edges = solid_edges(&topo, solid).unwrap();
+        let result = chamfer_v2(&mut topo, solid, &edges, d, d).unwrap().solid;
+        let shell = topo.solid(result).unwrap().outer_shell();
+
+        let mut planes = 0usize;
+        let mut curved = 0usize;
+        for &fid in topo.shell(shell).unwrap().faces() {
+            match topo.face(fid).unwrap().surface() {
+                FaceSurface::Plane { .. } => planes += 1,
+                _ => curved += 1,
+            }
+        }
+        assert_eq!(
+            (planes, curved),
+            (18, 0),
+            "the present result is 18 planes and nothing else at d={d}; a \
+             NURBS face here would mean a spherical corner patch had been \
+             substituted for the flat triangle a chamfer requires"
+        );
+    }
+}
+
+/// The standing record of the experiment that ruled out the obvious fix.
+///
+/// `corner::compute_corners` was wired into `chamfer_builder` unchanged, the
+/// way `fillet_builder` calls it, and measured at d = 0.5 / 1 / 2. The face
+/// count went 18 -> 26, so the routine does produce 8 corner faces. The shell
+/// did **not** close: `V/E/F = 100/96/26`, `free = 96`, `over-shared = 0`,
+/// `components = 26` — every one of the 96 edges orphaned, and 26 isolated
+/// pieces instead of 18.
+///
+/// The 8 new faces were NURBS, not planes. `corner.rs` sends 3+ stripe
+/// vertices to `spherical_triangle`, whose module docs say "rolling-ball
+/// sphere", "great-circle arcs" and "Fillet radius"; a chamfer corner is a
+/// flat triangle. It also reads `CircSection`, which `analytic.rs` fills with
+/// a chord half-length while noting that the struct "is shaped for fillets".
+///
+/// Recording it here means the next person does not spend the experiment
+/// again. Re-run it by reverting this test's `WIRED_UP` marker to true and
+/// adding the call; the numbers above are what to expect.
+///
+/// The consequence for the fix: the chamfer corner patch has to be a **plane
+/// through the three contact points**, constructed by chamfer-specific code.
+/// Reusing the fillet corner module cannot produce it.
+#[test]
+fn the_spherical_corner_path_is_wrong_for_chamfer() {
+    // These assertions describe the un-wired baseline. If
+    // `corner::compute_corners` ever does get wired into `chamfer_builder`,
+    // this whole file's expectations move, and the numbers in this test's docs
+    // are the ones to re-measure.
+    for &d in &DISTANCES {
+        let mut topo = Topology::new();
+        let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
+        let edges = solid_edges(&topo, solid).unwrap();
+        let result = chamfer_v2(&mut topo, solid, &edges, d, d).unwrap().solid;
+        let shell = topo.solid(result).unwrap().outer_shell();
+
+        let mut usage: HashMap<usize, usize> = HashMap::new();
+        let mut nurbs = 0usize;
+        for &fid in topo.shell(shell).unwrap().faces() {
+            if !matches!(topo.face(fid).unwrap().surface(), FaceSurface::Plane { .. }) {
+                nurbs += 1;
+            }
+            let face = topo.face(fid).unwrap();
+            for wid in std::iter::once(face.outer_wire()).chain(face.inner_wires().iter().copied())
+            {
+                for oe in topo.wire(wid).unwrap().edges() {
+                    *usage.entry(oe.edge().index()).or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Wiring the spherical path in produced 8 NURBS faces. Un-wired, there
+        // are none.
+        assert_eq!(
+            nurbs, 0,
+            "the spherical corner path must not be wired in: it yields 8 NURBS \
+             faces where a chamfer requires flat triangles (d={d})"
+        );
+        // And every edge stays free, which is the shell symptom the spherical
+        // path was supposed to fix and did not.
+        let free = usage.values().filter(|&&n| n == 1).count();
+        assert_eq!(
+            free,
+            usage.len(),
+            "with the spherical path un-wired every edge is free, as measured \
+             before the experiment (d={d}); wiring it in left all 96 free too"
         );
     }
 }
