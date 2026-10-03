@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791003911775,
+  "lastUpdate": 1791066773289,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -863,6 +863,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 51595168,
             "range": "± 16304403",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "535c43c5210dcd2d68396699760a78b9fce03836",
+          "message": "fix(check): count cavity shells in solid volume, area and centroid\n\nE-01 was closed a few rounds ago as \"already fixed in this fork\", and it\nwas -- in operations::measure. crates/check carries a second, independent\nimplementation of the same three quantities, and nobody looked there.\nsolid_volume, solid_area and center_of_mass each opened the solid with\nsolid_data.outer_shell() and stopped, so a cavity was measured as if it\nwere filled: its six walls contributed nothing to the surface area and\nits 8 units of volume were added instead of subtracted.\n\nThat the same crate got this right elsewhere is what made the miss\nsurvive. classify, winding, distance and validate all walk outer + inner\nshells; one file was left behind, and nothing fails to compile when a\nsecond copy of a traversal disagrees with the first. distance even had\nits own private collect_solid_faces doing the correct walk, in the\nneighbouring module, while properties did the wrong one.\n\nMeasured against the hollow cube already used by operations::measure\n(outer [0,4]^3, cavity [1,3]^3), before and after:\n\n  volume      expected  56     got  64\n  area        expected 120     got  96\n  centroid    expected 125/63  got  2.0\n\nAll three now land within 1e-6. The three controls that drop the inner\nshell are unchanged and were green throughout, which is the part that\nrules out \"the numbers moved because arithmetic changed\": same code, same\ntolerances, only the face set differs.\n\nNo sign was introduced by hand. An inner shell's normals point away from\nthe material, so the divergence theorem subtracts the cavity on its own,\nand the wholesale flip at the end of integrate_planar_polygon restores\nthe sign the clockwise loops had inverted. Adding either would have been\na second guess layered on top of the first.\n\nEach of the three gets its own test plus a solid-body control, and the\ntraversal now lives in one place -- check::util::solid_face_ids -- with\ndistance's duplicate deleted and its four call sites pointed at the\nshared fn. One entry point is the deliverable here; the repeated walk is\nthe reason this was diagnosable only by reading every consumer.\n\nRegression: check 64, algo 209, operations 814 (7 ignored, unchanged),\nheal 86, offset 14, io full; fmt clean, check-boundaries.sh passes.\nReverse-verified by restoring the outer-only walk: the three primary\ncases go red, the three controls stay green.",
+          "timestamp": "2026-10-04T06:19:49+08:00",
+          "tree_id": "e3048a8e2c4f7b9ad27edf445034b0d4842343db",
+          "url": "https://github.com/Faicad/brepkit2/commit/535c43c5210dcd2d68396699760a78b9fce03836"
+        },
+        "date": 1791066772513,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 506989,
+            "range": "± 2725",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 554692,
+            "range": "± 3185",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 6837,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 372383,
+            "range": "± 2071",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 14721681,
+            "range": "± 19717",
             "unit": "ns/iter"
           }
         ]
