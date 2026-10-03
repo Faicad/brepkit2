@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790983165377,
+  "lastUpdate": 1791003911775,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -809,6 +809,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 15251132,
             "range": "± 247178",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "ddafbf48f8a486123312e65aa3ae2078082587e8",
+          "message": "docs(analysis): record the chamfer corner-patch attempt and what it measured\n\nThe previous round left an instruction: wire up corner::compute_corners, then\ndrop the two #[ignore]s. Tried it. The first half does not work, and this\nrecords why so the next attempt starts from measurements instead of from that\nsuggestion.\n\nReusing corner::compute_corners as fillet_builder calls it gets the face count\nright (18 -> 26) and the shell *more* broken: free goes 72 -> 96 and the result\nsplits into 26 pieces instead of 18. The two corners are different geometry --\ncorner.rs routes 3+ stripe vertices to spherical_triangle (rolling-ball sphere,\ngreat-circle arcs, Fillet radius) and a chamfer corner is a flat triangle, so\nthe boundary arcs miss the straight contact lines. It also reads CircSection,\nwhich analytic.rs itself describes as \"shaped for fillets\".\n\nWriting a planar corner patch instead does reach the face budget: 8 flat\ntriangles, F = 26, over-shared = 0. The shell still does not close -- free 64,\ncomponents 12. The reason is visible in the vertex count and was the reason\nnothing downstream could help: a closed chamfered cube has V = 24 (two contact\npoints per original edge, twelve edges) and this solid has V = 76, in both\nstates. The three producers -- trimmer contact edge, stripe flank, corner face\n-- each mint their own vertex entities, so the vertices describing one point\nare distinct and no edge is ever shared. free cannot reach 0. weld_faces is no\nhelp either: over the 72 edge occurrences the number of distinct (start, end)\nposition pairs quantised to 1e-6 is also 72, so there is no duplicate to\ncollapse, and wiring it in behind the corner patches left free at 64.\n\nSo the corner patch fixed a face count, not the topology underneath it. The\nreal fix is making assembly share vertex entities, across analytic.rs,\nbuilder_utils.rs and trimmer.rs -- an interface refactor, not more faces. The\nproduction change is therefore NOT in the tree; crates/*/src/ is untouched and\nchamfer_v2 behaves exactly as the existing ignored repros describe.\n\nThree of my own assumptions were wrong and are corrected in the write-up, each\ncaught by printing real vertices rather than reasoning:\n\n- A corner's contact point has degree 4, not 3 -- two partners on its own\n  corner plus two points of the neighbouring corners along the bevels.\n- \"Take the 2 nearest neighbours\" does not identify corners: a side face's own\n  corners also have 2 near ones, only a whole edge away. What works is the\n  shape of the sorted distance list, since a real corner is the smallest\n  cluster followed by a jump (1.41, 1.41, 10, 10) and a side corner runs the\n  other way (8, 8, 1, 1).\n- I claimed the side faces were missing their corner cuts and should be\n  octagons. They are correct squares -- chamfering cuts a side face's four\n  edges, not its four corners.\n\nThe write-up also drops a claim I had been leaning on: the control engine is\nnot a topological golden reference. It reaches free = 0 and passes\nvalidate_shell_closed, but its own V is 32 against 24 and V - E + F is 10, not\n2. In this codebase \"closed\" means every edge is referenced twice, which is not\nthe same as the Euler characteristic holding -- worth knowing before treating\nany single engine as the reference for topology.\n\nchamfer_v2_measurements.rs pins every number quoted above: the 76/72/18 shape,\nfree == 1 on all 72 edges, the vertex surplus against the 24 a closed chamfer\nneeds, the side faces being correct-but-unshared, the three corner legs all\npresent, the degree histogram, and the weld-collapse count with a control that\nproves the counter can see duplicates when they exist (reverse-verified by\nstubbing it to always return the occurrence count, which turns the control red\nat occurrences=96 distinct=96).\n\nThe two #[ignore]s stay. They flip green when the shell actually closes, which\nis a different change.",
+          "timestamp": "2026-10-03T12:32:05+08:00",
+          "tree_id": "8537854a747dd96879b984331b4859e08568ceca",
+          "url": "https://github.com/Faicad/brepkit2/commit/ddafbf48f8a486123312e65aa3ae2078082587e8"
+        },
+        "date": 1791003911084,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 508937,
+            "range": "± 8714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 574731,
+            "range": "± 10296",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 6801,
+            "range": "± 401",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 377316,
+            "range": "± 7739",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 51595168,
+            "range": "± 16304403",
             "unit": "ns/iter"
           }
         ]
