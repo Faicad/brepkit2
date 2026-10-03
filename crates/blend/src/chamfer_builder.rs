@@ -304,6 +304,24 @@ impl<'a> ChamferBuilder<'a> {
 
         result_faces.extend(&blend_face_ids);
 
+        // NOTE: `sew::weld_faces` is deliberately *not* called here, unlike
+        // `fillet_builder`. Measured on a 10^3 box at d = 0.5 / 1 / 2, adding it
+        // changes nothing at all — V/E/F stays 76/72/18, free stays 72,
+        // components stay 18 — because there is no second copy of any curve to
+        // weld in the first place: over the 72 edge occurrences the count of
+        // distinct (start, end) position pairs quantised to 1e-6 is also 72.
+        //
+        // The reason is upstream of welding. This builder never calls
+        // `corner::compute_corners` (the fillet builder does), so the eight
+        // corners where three chamfered edges meet are bounded by nothing: a
+        // chamfered cube needs 6 side faces + 12 bevels + 8 corner triangles =
+        // 26 faces, and the result here is 18 quads with no triangles. Each
+        // quad is individually closed, which is why the shell reads as 18
+        // disconnected pieces rather than one shell with holes.
+        //
+        // The fix is to build the corner patches, not to weld. See
+        // `crates/operations/tests/chamfer_shell_manifold.rs`, which pins both
+        // the defect and the control engine that gets F = 26 / free = 0 right.
         let new_shell = Shell::new(result_faces)?;
         let new_shell_id = topo.add_shell(new_shell);
         let new_solid = Solid::new(new_shell_id, Vec::new());

@@ -39,7 +39,7 @@ Root `tests/integration/` contains only a README describing the patterns. Runnab
 
 - `crates/operations/tests/`: the main suite. Boolean edge cases and invariants (`boolean_edge_cases.rs`, `boolean_invariants.rs`, `boolean_stress.rs`), coincident and coaxial families (`coincident_planes.rs`, `coaxial_cylinders.rs`, `coaxial_cones.rs`, `coaxial_torus.rs`, `concentric_spheres.rs`), regressions (`regress_hexwall_cuts.rs`), tessellation (`tessellate_watertight.rs`), and the parity corpus.
 - Parity corpus: `parity_boolean_planar.rs`, `parity_boolean_curved.rs`, `parity_boolean_empty.rs` share `parity_support/mod.rs`, which defines `struct Case` and `run_corpus(cases: &[Case])`. Oracles are exact closed-form values, never face counts: `enum Oracle` in `parity_support/mod.rs` has `Volume(f64)` (the most common), `Area(f64)`, and `Empty` (the result must be empty). Add new boolean scenarios as `Case` entries here when they have a closed-form expected value.
-- `crates/io/tests/`: fixture-based regressions (section 2).
+- `crates/io/tests/`: fixture-based regressions (section 3, "Fixture tiers in detail").
 - Others: `crates/math/tests/ssi_robustness.rs`, `crates/offset/tests/integration.rs`, `crates/render/tests/` (offscreen render and compute-mesh tests).
 
 Doctrine from `tests/integration/README.md`: measure, do not inspect topology. Verify with `volume()` / `bounding_box()`; tolerances around 1e-6 for direct computation, 1e-3 for I/O round-trips. Test the workflow, not the internals.
@@ -90,7 +90,94 @@ Find all: `rg -n '#\[ignore' crates -g '*.rs'`
 
 Lifecycle: bug found, ready-repro written and ignored, fix ships, `#[ignore]` removed in the fix PR, test becomes a permanent regression guard.
 
-## 2. Fixture tiers in detail
+## 2. Promoting a diagnostic probe to a test
+
+Use when an investigation measured something and the number is about to be quoted in a comment, a commit message, or a doc. Skeleton, following `crates/operations/tests/chamfer_corner_patches.rs`.
+
+```rust
+//! <Subject of the claim, and the claim itself: "a chamfered cube has 26 faces
+//! because the 8 corner patches are missing from chamfer_v2">.
+//!
+//! Why this file exists: a diagnostic probe measured <numbers>. Those numbers
+//! are quoted in <comment / commit / doc>, so they need an assertion behind
+//! them or they degrade into folklore.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
+
+/// The analytic budget. Never a recorded number — a value you can derive.
+const EXPECTED_FACES: usize = 6 + 12 + 8;
+const EXPECTED_TRIANGLES: usize = 8;
+
+// ── Right value: red now, green after the fix, assertions never edited ─────
+
+/// The defect stated as the budget it fails to meet.
+///
+/// Currently red and `#[ignore]`d so the default suite stays green; the
+/// failure IS the ticket. **The fix is <mechanism>; removing the `#[ignore]`
+/// turns this green with no edit to its assertions**, and
+/// `<current_value_test>` is deleted at the same time. The control below is
+/// what proves the expectation itself is right.
+#[test]
+#[ignore = "<engine> never calls <missing mechanism>, so <what is absent>"]
+fn engine_meets_the_analytic_budget() {
+    // assert_eq!(face_count(...), EXPECTED_FACES, "...");
+}
+
+// ── Wrong value: green, records the present, deleted on the fix ───────────
+
+/// Records what the engine produces instead, so the present state is pinned by
+/// a measurement rather than by a comment that can silently drift.
+///
+/// Deliberately green: this documents the present output, not the desired one.
+/// **When the fix lands, delete this test** — its numbers move into the module
+/// docs and the sibling file as the "before" measurement, and the ignore comes
+/// off `<right_value_test>`. Keeping both leaves a test asserting a state the
+/// engine is no longer in.
+#[test]
+fn engine_current_output_is_<shape>() {
+    // assert_eq!(face_count(...), <present number>, "if this moved, re-measure
+    //   everything quoted about it (d={d})");
+}
+
+// ── Control: green, proves the expectation and the measurement are sound ──
+
+/// A different engine that gets it right, so a failure is attributable.
+#[test]
+fn control_engine_meets_the_same_budget() {
+    // assert_eq!(face_count(...), EXPECTED_FACES, "...if this fails,
+    //   EXPECTED_FACES is wrong, not the engine");
+}
+
+/// The counter's own control: it must report the opposite answer when the
+/// opposite is true. Without this, a zero is indistinguishable from a broken
+/// measurement.
+///
+/// Reverse-verified: stubbing <helper> to return the other answer turns this
+/// red with <observed output>.
+#[test]
+fn the_measurement_discriminates() {
+    // assert!(count_positive_input(...) > count_negative_input(...), "...");
+}
+```
+
+Checklist before deleting any scratch file:
+
+- [ ] Every number the probe printed is asserted somewhere, or the claim was
+      dropped from the prose.
+- [ ] The `#[ignore]`d expectation test, run with `--ignored`, reports the exact
+      `left`/`right` delta claimed in prose.
+- [ ] Corrupting the expectation turns a control case red.
+- [ ] Corrupting the measurement turns its control red.
+- [ ] Restored, the suite is byte-identical to before the experiment.
+- [ ] No `git stash` / `reset` / `checkout` was used for any of the above; scratch
+      backup files and `cp` restore only.
+
+The mutation steps (third and fourth items) are what make this evidence rather
+than assertion. A measurement that can only produce one answer is decoration —
+this exact gap is what the `weld_faces` "no-op" claim in `chamfer_builder.rs`
+needed in order to be believable.
+
+## 3. Fixture tiers in detail
 
 ### Tier 1: native primitive repro
 
@@ -115,7 +202,7 @@ Some bugs exist only in a specific in-memory id/vertex layout. A STEP round-trip
 
 Decision rule: try tier 1. If the repro passes while the real tool fails, capture tier 2. If the STEP round-trip also passes while the in-memory case fails, capture tier 3. Never debug on a repro from a lower tier that does not reproduce.
 
-## 3. What to assert
+## 4. What to assert
 
 | Property | How | Do NOT use |
 |---|---|---|
@@ -127,7 +214,7 @@ Decision rule: try tier 1. If the repro passes while the real tool fails, captur
 
 Boolean gate context: `boolean()` in `crates/operations/src/boolean/mod.rs` validates the analytic GFA result and falls back to `mesh_boolean_fallback` (same file, `rg -n 'fn mesh_boolean_fallback'`) when validation fails. A silent fallback is itself a regression for analytic scenarios; assert face counts to catch it.
 
-## 4. Commands with expected output shapes
+## 5. Commands with expected output shapes
 
 ```bash
 cargo test --workspace
@@ -167,7 +254,7 @@ Failure shapes worth recognizing:
 
 Hooks (see `.husky/pre-commit` and `.husky/pre-push` for the authoritative contents): pre-commit runs fast checks only, fmt + clippy + taplo + cargo-machete in parallel, and runs no tests. Pre-push runs nothing locally; all validation (nextest, deny, boundaries, and more) is delegated to CI in `.github/workflows/ci.yml`, gated by the `ci-pass` job. Nothing on the local path runs the test suite for you: run tests manually before pushing. Never bypass the hooks.
 
-## 5. Glossary
+## 6. Glossary
 
 - **GFA**: brepkit2's general boolean engine (`crates/algo`), a pave-filler plus builder pipeline that intersects, splits, classifies, and reassembles faces.
 - **PaveFiller**: GFA phase 1, computes interferences between entity pairs and splits edges at paves (intersection points). Phases VV/VE/EE/VF/EF/FF; FF (face-face) creates intersection sections and hosts most curved-boolean bugs.
