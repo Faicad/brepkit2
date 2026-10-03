@@ -52,7 +52,7 @@ pub fn point_to_solid(
     point: Point3,
     solid: SolidId,
 ) -> Result<DistanceResult, CheckError> {
-    let face_ids = collect_solid_faces(topo, solid)?;
+    let face_ids = crate::util::solid_face_ids(topo, solid)?;
 
     let mut face_aabbs: Vec<(usize, Aabb3)> = Vec::with_capacity(face_ids.len());
     for (i, &fid) in face_ids.iter().enumerate() {
@@ -199,7 +199,7 @@ pub fn solid_to_solid(
     }
 
     // Pass 2: Vertices of A against faces of B.
-    let faces_b = collect_solid_faces(topo, solid_b)?;
+    let faces_b = crate::util::solid_face_ids(topo, solid_b)?;
     let mut aabbs_b: Vec<(usize, Aabb3)> = Vec::with_capacity(faces_b.len());
     for (i, &fid) in faces_b.iter().enumerate() {
         let aabb = crate::util::face_aabb(topo, fid)?;
@@ -222,7 +222,7 @@ pub fn solid_to_solid(
     }
 
     // Pass 3: Vertices of B against faces of A.
-    let faces_a = collect_solid_faces(topo, solid_a)?;
+    let faces_a = crate::util::solid_face_ids(topo, solid_a)?;
     let mut aabbs_a: Vec<(usize, Aabb3)> = Vec::with_capacity(faces_a.len());
     for (i, &fid) in faces_a.iter().enumerate() {
         let aabb = crate::util::face_aabb(topo, fid)?;
@@ -301,20 +301,6 @@ fn collect_solid_vertices(topo: &Topology, solid: SolidId) -> Result<Vec<Point3>
         }
     }
     Ok(points)
-}
-
-/// Collect all face IDs from a solid (outer + inner shells).
-fn collect_solid_faces(topo: &Topology, solid: SolidId) -> Result<Vec<FaceId>, CheckError> {
-    let solid_data = topo.solid(solid)?;
-    let mut faces = Vec::new();
-    let shell_ids: Vec<_> = std::iter::once(solid_data.outer_shell())
-        .chain(solid_data.inner_shells().iter().copied())
-        .collect();
-    for sid in shell_ids {
-        let shell = topo.shell(sid)?;
-        faces.extend(shell.faces().iter().copied());
-    }
-    Ok(faces)
 }
 
 /// Collect edge segments as polylines for edge-edge distance computation.

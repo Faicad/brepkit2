@@ -5,6 +5,7 @@ use brepkit_math::vec::{Point2, Point3, Vec3};
 use brepkit_topology::Topology;
 use brepkit_topology::edge::EdgeCurve;
 use brepkit_topology::face::{FaceId, FaceSurface};
+use brepkit_topology::solid::SolidId;
 
 use crate::CheckError;
 
@@ -193,6 +194,28 @@ pub fn point_in_loop_3d(point: &Point3, loop_: &FaceLoop, normal: &Vec3) -> bool
         }
     }
     inside
+}
+
+/// Every face of a solid: its outer shell followed by each inner shell.
+///
+/// A cavity is part of the boundary, so any property integrated over a
+/// solid (volume via the divergence theorem, surface area, ray-based point
+/// classification) must see its walls too. Reading only `outer_shell()`
+/// measures a hollow body as if it were solid: the void counts as material
+/// and the cavity's walls are missing from the surface.
+///
+/// # Errors
+///
+/// Returns an error if the solid or any of its shells is missing.
+pub fn solid_face_ids(topo: &Topology, solid: SolidId) -> Result<Vec<FaceId>, CheckError> {
+    let solid_data = topo.solid(solid)?;
+    let mut faces = Vec::new();
+    for shell_id in
+        std::iter::once(solid_data.outer_shell()).chain(solid_data.inner_shells().iter().copied())
+    {
+        faces.extend_from_slice(topo.shell(shell_id)?.faces());
+    }
+    Ok(faces)
 }
 
 /// Build every boundary loop of a face: the outer loop first, then one loop

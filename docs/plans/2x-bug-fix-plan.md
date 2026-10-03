@@ -29,6 +29,7 @@
 | C-10 | WASM 中 blend panic 杀死整个实例 | **未复现 → 跳过** | — | `wasm/src/bindings/operations.rs:276,332` 与 `batch.rs:812` 已全部包 `catch_unwind` |
 | D-01 | sweep 把 profile 重新居中到路径起点 | **语义选择，不改** | — | 直线快路径与通用路径语义一致，且整体满足平移不变性；改成"按原位置"会让所有既有扫掠模型位置漂移，收益与风险不成比例 |
 | C-09 | fillet 全引擎失败时静默返回原实体 | **语义选择，不改** | — | `wasm/src/helpers.rs::try_fillet` 已有封闭流形门禁 + 三引擎回退，"返回原实体"是明确定义的降级路径；改为抛错属破坏性 API 变更 |
+| E-06 | `check::properties` 的体积/面积/质心只遍历 `outer_shell`（E-01 的第二现场） | **已修复** | `check/src/properties/mod.rs::cavity_shell_subtracts_volume`（64，应为 56）、`cavity_shell_adds_surface_area`（96，应为 120）、`off_centre_cavity_shifts_center_of_mass`（2.0，应为 125/63）+ 三条对照 | 新增 `util::solid_face_ids`（outer + inner shells）；`solid_volume` / `solid_area` / `center_of_mass` 改用它；`distance::collect_solid_faces` 是同一逻辑的第二份实现，删除并改为调用新入口。见 §0''''''''''' |
 
 回归结果：`brepkit-check` 54 项全通过；`brepkit-io` 全量（含 60+ 集成测试）全通过；`brepkit-operations` 全量（809 库测试 + 全部集成测试）全通过。过程、跳过项与不修的决定见 §0''。
 
@@ -536,6 +537,61 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 
 ---
 
+## 0'''''''''''. 第十二轮实施记录（E-06：check::properties 只遍历 outer shell）
+
+> 日期：2026-10-03。本轮独立自主选定（`roadmap` 的 "Chase operations … prioritized by prettyfilter"，本条属于"数值正确性 + 已有两套实现交叉对照"的组合）。
+
+### 0'''''''''''.1 起因：同一个症状的第二现场
+
+E-01 当时的结论是"本 fork 已修（`operations/src/measure/helpers.rs` 已 `chain(inner_shells)`）→ 跳过"，那一轮只覆盖了 `brepkit-operations`。本轮发现 `crates/check` 里还有一份**独立的** properties 实现（`check::properties::{solid_volume, solid_area, center_of_mass}`），三条路径全部只从 `solid_data.outer_shell()` 取面。同一个 crate 内 `classify` / `winding` / `distance` / `validate` 都已在 E-05 等轮次改成 outer + inner，唯独 properties 三兄弟没跟上。
+
+这不是重复劳动的证据：`operations::measure` 与 `check::properties` 是两套不同的积分代码（前者按 deflection 采样 + reviewers helper，后者是 `face_integrator` 的高斯/扇形积分），各自都要遍历正确的面集合，改好其中一套对另一套没有任何作用 —— 这恰恰是这类缺陷容易被判定为"已修"的原因。
+
+### 0'''''''''''.2 复现
+
+夹具沿用 `operations::measure` 里 E-01 那条已验证的 hollow cube（外壳 `[0,4]³` + 内腔 `[1,3]³`，内腔用 `Face::new_reversed`），并配"去掉内腔"的同族对照：
+
+| 用例 | 期望 | 修复前实测 |
+|---|---|---|
+| `cavity_shell_subtracts_volume` | 64 − 8 = 56 | **64**（腔被当成材料） |
+| `solid_cube_volume_ignores_no_shell`（对照） | 64 | 64 ✓ |
+| `cavity_shell_adds_surface_area` | 6·16 + 6·4 = 120 | **96**（六个腔壁面缺失） |
+| `solid_cube_area_has_no_inner_walls`（对照） | 96 | 96 ✓ |
+| `off_centre_cavity_shifts_center_of_mass` | (64·2 − 1·3)/63 = 125/63 | **2.0**（偏心腔没被扣掉，质心不动） |
+| `centred_cavity_keeps_center_of_mass`（对照） | (2,2,2) | (2,2,2) ✓ |
+
+三条主用例红、三条对照绿：失败只可能来自 shell 遍历，不可能是夹具绕向搞反（绕向错了对照也会红）。期望值全部是解析值，且 hollow cube 的 56 / 120 本仓库里已有第二套独立实现把它跑绿（`operations::measure` 的 E-01 两条护栏），因此期望值不是本机自证。
+
+### 0'''''''''''.3 修复，以及"为什么不需要额外翻符号"
+
+- 新增 `check::util::solid_face_ids`：返回 outer + inner shells 的全部面；`properties` 三个函数改用它。
+- `distance::collect_solid_faces` 是同一逻辑的第二份实现，已删除并改为调用新入口。理由写在 §3 的 1.8：这类"遍历哪些面"的判断在本仓库历史上漏改过不止一次，而漏改一份实现没有任何编译期信号，单一入口比多份并行更难再次漏掉。
+- **没有引入符号翻转。** 内腔壳的面法向背离材料（指向腔内），散度定理对这种定向天然给出负贡献：`∮_{cavity, N 指向腔内} P·N dA = −3·V_cavity`，即 (1/3) 之后是 −8。实施前曾被怀疑的一点：`integrate_planar_polygon` 末尾那个 wholesale flip（有符号面积为负就整体取反）会不会把它又翻回正。不会 —— 对 reversed 面来说 wire 绕向相对 effective_normal 是 CW，扇形累加的每个有符号量整体是"真值取负"，flip 恰好还原，最终得到正确的负值。这一点没有靠推理定论：修复后三条断言（56 / 120 / 125/63）一次到位，误差 < 1e-6（平面积分本身精确），实测即结论。
+
+### 0'''''''''''.4 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证 | 把三个函数改回 `outer_shell()` → 三条主用例转红（64 / 96 / 2.0），三条对照仍绿；恢复后全绿。测试确实锁定该缺陷 |
+| `cargo test -p brepkit-check` | ✅ 64 passed（含 6 条新用例） |
+| `cargo test -p brepkit-algo` | ✅ 209 passed（`pave_filler::tests` 是 `check::properties` 的下游用户） |
+| `cargo test -p brepkit-operations` | ✅ 814 库测试 + 全部集成测试通过，7 ignored（与本轮前一致，无新增 ignore） |
+| `cargo test -p brepkit-heal` | ✅ 86 passed |
+| `cargo test -p brepkit-offset` | ✅ 14 passed |
+| `cargo test -p brepkit-io` | ✅ 全量通过 |
+| `cargo clippy -p brepkit-check --all-targets` | ✅ 零告警 |
+| `cargo fmt --all -- --check` | ✅ 干净 |
+| `scripts/check-boundaries.sh` | ✅ All crate boundaries valid |
+
+改动文件：`crates/check/src/util.rs`（新增 `solid_face_ids`）、`crates/check/src/properties/mod.rs`（三处遍历 + 6 条测试）、`crates/check/src/distance/mod.rs`（删掉重复的私有实现，改调新入口）。`crates/topology`、`crates/math` 无需改动。
+
+### 0'''''''''''.5 残留（未在本轮处理，均未复现）
+
+- `check::properties::bounding_box` 也只走 outer shell，但外壳已覆盖腔的包围盒，**数值上等价**，不构成缺陷，不改。
+- `check::properties::analytic` / `accumulator` 是纯解析累积器，不遍历拓扑，不受影响。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |
@@ -619,6 +675,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 | E-03 | ray-cast 分类：射线穿过**面孔（洞）**仍算一次穿越 → 内外判定反 | **已确认**：`check/src/util.rs:84-87` `face_polygon` 只取 `outer_wire`，完全忽略 `inner_wires` |
 | E-04 | 圆孔缺少解析命中测试（依赖多边形化，边界抖动） | **已修复**（第十一轮，见 §0''''''''''）：平面上的圆边界此前只以 32 边形参与判定，半径落在 `(cos π/32, 1)` 的月牙带内判定翻转（`r=0.997` 时 720 角度中 448 个错）。改为多边形照旧、但为每条弦补记"弦与弧之间的月牙"，点落在月牙里就翻转一次 —— 加密采样不可行（压到顶点容差需 ~7000 点/圆，而这是每射线每面的热路径）。**残余**：椭圆边与 NURBS 边仍为近似；`crates/algo` 里有一份独立实现（`planar_face_polygons`）同样未修 |
 | E-05 | 点分类只遍历 `outer_shell` | **已确认**：`check/src/classify/mod.rs:65` |
+| E-06 | 体积/面积/质心未计内腔壳 —— **同一症状在 `crates/check` 里的独立实现** | **已修复**（第十二轮，见 §0'''''''''''）：`operations/measure` 那份已在 E-01 轮次覆盖，但 `check::properties::{solid_volume, solid_area, center_of_mass}` 是另一套积分代码，三条路径各自只从 `outer_shell()` 取面 |
 
 ### F. IO（crates/io）
 
@@ -687,6 +744,7 @@ degree-(2,2) 有理补丁在宽球面三角形上会中间内凹：实测补丁�
 | 1.5 | E-01 | 复核 `volume.rs` / `area.rs` / 质心三条路径是否都经过 `collect_solid_face_ids`；补齐遗漏路径并加空心体解析对照（球壳体积 = 4/3π(R³−r³)） |
 | 1.6 | C-01/C-02/C-03 | 圆角：在现有 closed-manifold 门禁之上加**三条几何门禁**——① 体积不得大于输入体；② 无面法向翻转；③ 角部顶点邻域不得出现非流形边。任一不满足即拒绝该引擎结果并回退；三条门禁同时作为角部 setback / 混合半径 / 翻面的回归网 |
 | 1.7 | C-10 | 审计 WASM 全部 blend 入口（`fillet` / `filletV2` / `chamferV2` / batch / evolution），统一包 `catch_unwind`，把 panic 转成 `JsError`，保证实例存活 |
+| 1.8 | E-06 | 面集合取齐：任何按面遍历的量值（体积/面积/质心）统一走 outer + inner shells 的单一入口。隐患不止一处——同一逻辑在 `crates/check` 内曾有三份并行实现（properties ×3 合并前、distance），漏改其中一份不会有任何编译期信号 |
 
 ### Phase 2 — P1：布尔几何精度（A 域 + B 域）
 
