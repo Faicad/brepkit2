@@ -49,7 +49,9 @@ Hard rules:
 
 Branch protection requires only `CI Pass`. The AI review check (`cubic · AI code reviewer`) is NOT required by branch protection, so the PR can show mergeable while unread findings sit on it. Policy, not GitHub, enforces the gate:
 
-1. After `gh pr create`, work on the next independent task. Reviewers (cubic, Copilot) comment within roughly 5 to 7 minutes.
+> The reviewer names below are external GitHub Apps / services, not configuration in this repository — they do not appear in `.github/workflows/`. Verify with `gh pr checks <N>` that a given one is actually installed and reporting before waiting on it; if the check never appears, the gate is vacuous and only `CI Pass` is real.
+
+1. After `gh pr create`, work on the next independent task. Installed reviewers comment within roughly 5 to 7 minutes.
 2. Poll until the review check completes:
    ```bash
    gh pr view <N> --json statusCheckRollup \

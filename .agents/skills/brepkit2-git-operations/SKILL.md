@@ -1,3 +1,8 @@
+---
+name: brepkit2-git-operations
+description: Use when running git commands in the brepkit2 repository: committing, branching, inspecting history, or recovering from a rejected commit. Covers the Conventional Commits contract, what must never be run against the working tree, and the worktree layout.
+---
+
 # Skill: brepkit2 Git Operations
 
 在 brepkit2 仓库内执行 git 操作时，遵守以下约定。

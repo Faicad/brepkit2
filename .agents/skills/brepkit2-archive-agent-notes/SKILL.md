@@ -1,3 +1,8 @@
+---
+name: brepkit2-archive-agent-notes
+description: Use when moving implemented Agent Notes into the frozen archive, editing the notes manifest, or deciding an Agent Note is terminal: implemented, rejected, or still proposed. Covers the archive layout and the verify scripts that guard it.
+---
+
 # Skill: brepkit2 Archive Agent Notes
 
 When archiving implemented Agent Notes to the frozen archive.

@@ -23,7 +23,7 @@ const PATTERNS = [
   'docs/**/*.md',
   'crates/*/README.md',
   'AGENTS.md',
-  '.claude/skills/**/*.md',
+  '.agents/skills/**/*.md',
 ]
 
 /** A broken relative link: a missing target path or a missing anchor on it. */

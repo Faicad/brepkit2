@@ -1,3 +1,8 @@
+---
+name: brepkit2-doc-standards
+description: Use when writing, editing, or reviewing any brepkit2 documentation: standing docs in docs/, the mdBook in book/src/, design docs in docs/plans/, Agent Notes, or a bilingual pair. Covers which directory a document belongs in, the bilingual pairing requirement, and the doc-sync gate.
+---
+
 # Skill: brepkit2 Doc Standards
 
 When writing or editing documentation in the brepkit2 repository, follow these standards.
@@ -9,8 +14,8 @@ When writing or editing documentation in the brepkit2 repository, follow these s
 - **Design document** (requirements, plan) → `docs/plans/yyyy-mm-dd-topic.md`
 - **Technical analysis** → `docs/analysis/`
 - **Decision record** → `.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md`
-- **Reusable workflow** → `.claude/skills/<skill-name>/SKILL.md`
-- **Session instructions** → `AGENTS.md` / `AGENTS.md` (root or subtree)
+- **Reusable workflow** → `.agents/skills/<skill-name>/SKILL.md`
+- **Session instructions** → `AGENTS.md` (root or subtree)
 
 ## Rules
 

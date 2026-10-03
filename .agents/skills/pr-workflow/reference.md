@@ -39,6 +39,8 @@ Local pre-commit covers only fmt, clippy, taplo, machete, and the last two only 
 | `copilot-pull-request-reviewer` | Inline review comments |
 | `cubic-dev-ai` | Review plus a `cubic · AI code reviewer` check |
 
+These are external GitHub Apps installed on the repository, not configuration committed here — nothing in `.github/workflows/` registers them. Check `gh pr checks <N>` for which are live; treat any name below that never appears as not installed.
+
 Reading findings:
 
 ```bash

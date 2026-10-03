@@ -4,6 +4,12 @@ Distilled working knowledge for building, debugging, and shipping the brepkit2 B
 each skill captures the method and traps for one recurring class of task. Written for
 engineers and agents working in this repo, with only this repo and AGENTS.md as context.
 
+Skills follow the Agent Skills open standard: one directory per skill, a `SKILL.md` with
+`name` + `description` frontmatter, and optional `reference.md` for detail that would
+otherwise crowd the catalog. They live in `.agents/skills/` because that location is
+vendor-neutral — any tool that reads the standard discovers them, and none of the content
+is tied to a specific agent product.
+
 ## Index
 
 | Skill | Reach for it when |
@@ -21,9 +27,37 @@ engineers and agents working in this repo, with only this repo and AGENTS.md as 
 | [wasm-bindings](wasm-bindings/SKILL.md) | Adding `BrepKernel` methods, wiring `executeBatch`, building the wasm package, or debugging wasm-only failures. |
 | [io-formats](io-formats/SKILL.md) | A STEP or other file imports wrong (dropped solids, all-NURBS, hard entity errors), verifying writer round-trips, capturing a faithful fixture, or adding a format in `crates/io`. |
 | [render-verify](render-verify/SKILL.md) | Working on `brepkit-render` or visually verifying a solid, including headless capture of a live viewer window. |
-| [testing](testing/SKILL.md) | Writing or placing tests, building a faithful regression fixture, handling golden mismatches, or ending a session with unverified work. |
+| [testing](testing/SKILL.md) | Writing or placing tests, building a faithful regression fixture, promoting a diagnostic probe to a test, handling golden mismatches, or ending a session with unverified work. |
 | [profiling](profiling/SKILL.md) | An operation or benchmark is slow, a criterion bench misbehaves, or a PR needs before/after perf numbers. |
 | [pr-workflow](pr-workflow/SKILL.md) | Committing, pushing, opening, or merging a PR; hook failures, commitlint, the AI-review merge gate, worktrees. |
+| [brepkit2-doc-standards](brepkit2-doc-standards/SKILL.md) | Writing or reviewing any documentation: which directory it belongs in, bilingual pairing, and the doc-sync gate. |
+| [brepkit2-prose-standard](brepkit2-prose-standard/SKILL.md) | Writing English prose in docs, comments, or commit messages: sentence structure, line-per-paragraph, protected terms. |
+| [brepkit2-translate-docs](brepkit2-translate-docs/SKILL.md) | Translating a document between English and Chinese, or creating the paired translated file. |
+| [brepkit2-git-operations](brepkit2-git-operations/SKILL.md) | Running git commands here: Conventional Commits, what must never touch the working tree, worktree layout. |
+| [brepkit2-archive-agent-notes](brepkit2-archive-agent-notes/SKILL.md) | Archiving implemented Agent Notes, editing the notes manifest, or classifying a note's lifecycle state. |
+
+## Suggested reading order for a new engineer
+
+1. Doctrine and verification: `roadmap`, `debugging-doctrine`, `solid-verification`, `numerical-robustness`, `testing`.
+2. The engine: `boolean-debugging`, `fillet-blend`, `analytic-preservation`, `tessellation`.
+3. Building: `layer-boundaries`, `add-operation`, `wasm-bindings`, `io-formats`, `render-verify`.
+4. Shipping: `pr-workflow`, `profiling`, `brepkit2-git-operations`.
+5. Writing about it: `brepkit2-doc-standards`, `brepkit2-prose-standard`, `brepkit2-translate-docs`, `brepkit2-archive-agent-notes`.
+
+## Editor hooks
+
+Three advisory checks ship as plain scripts and take file paths as arguments, so any
+agent or CI step can call them:
+
+| Script | Warns about |
+|---|---|
+| `scripts/check-layer-imports.sh` | a crate importing from a higher layer (fast subset of `check-boundaries.sh`) |
+| `scripts/check-unwrap.sh` | `.unwrap()` / `.expect()` in non-test code |
+| `scripts/check-enum-ripple.sh` | editing a shared enum without visiting its `match` sites |
+
+`.claude/hooks/` holds thin adapters that translate one tool's edit-hook JSON into
+arguments for these. They are optional and tool-specific; the scripts are the contract.
+
 
 ## Suggested reading order for a new engineer
 

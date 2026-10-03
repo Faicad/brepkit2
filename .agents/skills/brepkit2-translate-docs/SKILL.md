@@ -1,3 +1,8 @@
+---
+name: brepkit2-translate-docs
+description: Use when translating a brepkit2 document between English and Chinese, or when creating the paired translated file. Covers the translation manifest, link rewriting, and the pairing verification gate.
+---
+
 # Skill: brepkit2 Translate Docs
 
 When translating a document between English and Chinese in the brepkit2 repository.

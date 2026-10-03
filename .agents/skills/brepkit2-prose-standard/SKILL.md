@@ -1,3 +1,8 @@
+---
+name: brepkit2-prose-standard
+description: Use when writing or editing English prose in brepkit2 documentation, code comments, or commit messages. Covers sentence structure, one physical line per paragraph, and the terms that must not be reworded.
+---
+
 # Skill: brepkit2 Prose Standard
 
 When writing prose in brepkit2 documentation, follow these rules.

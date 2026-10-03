@@ -13,8 +13,8 @@ set -euo pipefail
 
 DOCS=(
   "AGENTS.md"
-  .claude/skills/*.md
-  .claude/skills/*/*.md
+  .agents/skills/*.md
+  .agents/skills/*/*.md
 )
 
 # Paths that do not resolve on main by design.

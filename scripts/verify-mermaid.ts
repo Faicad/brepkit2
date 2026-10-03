@@ -22,7 +22,7 @@ const PATTERNS = [
   'docs/**/*.md',
   'crates/*/README.md',
   'AGENTS.md',
-  '.claude/skills/**/*.md',
+  '.agents/skills/**/*.md',
 ]
 
 interface Block {

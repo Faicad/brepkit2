@@ -39,12 +39,22 @@ tarpaulin-report.html
 # mdBook
 /book/book/
 
-# Claude Code working files (memory, worktrees, research)
+# Per-agent local state (tool-specific, never committed)
+#
+# Committed agent config is vendor-neutral and lives in `.agents/`:
+#   .agents/skills/   Agent Skills (SKILL.md per skill)
+#   .agents/notes/    Agent Notes (decision records)
+# Agent Skills are an open standard read by many tools, so they are versioned
+# here on purpose. What follows is per-tool scratch state, listed per vendor so
+# a new tool does not silently start committing its working files.
 .claude/agent-memory-local/
 .claude/worktrees/
 .claude/research/
 .claude/*.md
 !.claude/settings.json
+.claude/scheduled_tasks.lock
+.cursor/
+# End per-agent local state
 
 # Git worktrees
 .worktrees/
@@ -53,4 +63,3 @@ tarpaulin-report.html
 *-INTERNAL.md
 ISSUES-*.md
 ROADMAP.md
-.claude/scheduled_tasks.lock

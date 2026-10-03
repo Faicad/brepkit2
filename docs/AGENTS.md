@@ -11,7 +11,7 @@ This file defines the documentation standard for the brepkit2 repository. Read t
 | Plans | `docs/plans/` | Design documents: requirements, technical analysis, implementation plan | No | Archived monthly into `yyyy-mm/` folders |
 | Analysis | `docs/analysis/` | Technical analysis/comparison documents | No | No user requirements |
 | Agent Notes | `.agents/notes/` | Decision records: why, what was given up, alternatives | Yes | See [README.md](../.agents/notes/README.md) |
-| Skills | `.claude/skills/` | Reusable workflows | No | SKILL.md per skill |
+| Skills | `.agents/skills/` | Reusable workflows | No | SKILL.md per skill |
 | Root instructions | `AGENTS.md` | Session-level standing instructions | No (English only) | |
 | Subtree instructions | `*/AGENTS.md` | Subtree-specific instructions | No (English only) | |
 
