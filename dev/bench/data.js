@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791066773289,
+  "lastUpdate": 1791075249296,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -917,6 +917,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 14721681,
             "range": "± 19717",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "60da940a9d8e59cf69856f574ae16311676f299c",
+          "message": "fix(check): exclude inner wire holes from parametric face integration",
+          "timestamp": "2026-10-04T08:35:26+08:00",
+          "tree_id": "5321b39af95cd16b46ce8bd6facacb4aea39955e",
+          "url": "https://github.com/Faicad/brepkit2/commit/60da940a9d8e59cf69856f574ae16311676f299c"
+        },
+        "date": 1791075248529,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 953107,
+            "range": "± 5494",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1029061,
+            "range": "± 2062",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 12078,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 707921,
+            "range": "± 7278",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24833383,
+            "range": "± 211536",
             "unit": "ns/iter"
           }
         ]
