@@ -592,6 +592,55 @@ E-01 当时的结论是"本 fork 已修（`operations/src/measure/helpers.rs` �
 
 ---
 
+## 0''''''''''''. 第十三轮实施记录（E-06 残留：face_integrator 参数面积分不排除内环孔洞）
+
+> 日期：2026-10-04。本轮是第十一轮 E-04 的残留项落地（见 §0''''''''''.4 留给后续表最后一条）。
+
+### 0''''''''''''.1 起因
+
+第十一轮 E-04 修复了 3D 判定路径的圆弧月牙近似，并在"留给后续"里记了一条：`face_integrator` 用 `face_polygon` 只取外环，**面的孔不参与面积积分**——带孔的参数面（圆柱/圆锥/NURBS patch）面积、体积、质心都把孔算成了实体材料。与 E-06 同型（遍历遗漏），但发生在 `face_integrator::integrate_parametric_trimmed` 这个独立实现里。
+
+### 0''''''''''''.2 复现
+
+夹具是圆柱面 patch（R=2, `u∈[0,π/2]`, `v∈[0,2]`）上挖掉 `u∈[π/4,π/2]`、`v∈[2/3,4/3]` 的矩形孔。孔的 UV 边界对齐到积分器自身的 patch 步长（`π/4` in u, `2/3` in v），使期望值是精确闭式而非近似。
+
+| 用例 | 期望 | 修复前实测 |
+|---|---|---|
+| `curvilinear_face_hole_is_excluded_from_area` | `2·(π−π/6) = 5π/3 ≈ 5.236` | **6.283**（= 2π，孔被当成材料） |
+| `curvilinear_face_hole_is_excluded_from_volume` | `4·(π−π/6)/3 = 10π/9 ≈ 3.491` | **4.189**（= 4π/3，同上） |
+| `curvilinear_face_without_hole_keeps_the_whole_patch`（对照） | `2π ≈ 6.283` | 6.283 ✓ |
+
+两条主用例红、对照绿：失败只可能来自孔洞未排除，不可能是积分器本身被改坏。期望值全部是解析值（圆柱面上 `area = R·UV_area`，`volume = R²·UV_area/3`）。
+
+### 0''''''''''''.3 修复
+
+两层改动：
+
+1. **构建孔洞 UV 多边形。** 新增 `build_face_uv_holes`：对每个 inner wire，用 `wire_polygon` 取 3D 顶点，投影到 UV，与外环做相同的 periodic-u unwrap。五个面类型（Cylinder/Cone/Sphere/Torus/Nurbs）的 `integrate_face` 分支全部调用它，把结果传给 `integrate_with_trimming`。
+
+2. **高斯点排除孔内点。** `integrate_parametric_trimmed` 增加 `hole_boundaries` 参数，在"外环内"判定通过后，对每个孔洞多边形做 `point_in_polygon`，落在任一孔内的高斯点跳过（零贡献）。周期 u 的 `test_u` wrapping 对外环和孔洞多边形共用，保证两者在同一 branch 内判定。
+
+3. **composite quadrature。** `integrate_parametric_trimmed` 原先是单 patch 高斯积分。孔边界切割高斯点区域时被积函数变为 step function，单 patch 高斯积分无法精确处理。改为与 `integrate_parametric` 相同的 composite 分 patch 策略（`MAX_PATCHES=16`，patch 步长 `π/4`）：当孔边界与 patch 边界对齐时，每个 patch 要么完全在孔内（全部跳过）、要么完全在孔外（全部积分），高斯积分恢复精确。
+
+### 0''''''''''''.4 验证闭环
+
+| 项 | 结果 |
+|----|------|
+| 反向验证 | 修复前两条主用例红（area=6.283, volume=4.189）、对照绿；修复后三条全绿（误差 < 1e-9）。孔排除确实生效 |
+| `cargo test -p brepkit-check` | ✅ 67 passed |
+| `cargo test -p brepkit-algo` | ✅ 209 passed |
+| `cargo test -p brepkit-operations` | ✅ 814 库测试 + 全部集成测试通过，7+1 ignored |
+| `cargo test -p brepkit-io` | ✅ 全量通过 |
+| `cargo test -p brepkit-heal` | ✅ 86 passed, 1 ignored |
+| `cargo test -p brepkit-offset` | ✅ 24+14 passed |
+| `cargo clippy -p brepkit-check --all-targets -- -D warnings` | ✅ 零告警 |
+| `cargo fmt --all -- --check` | ✅ 干净 |
+| `scripts/check-boundaries.sh` | ✅ All crate boundaries valid |
+
+改动文件：`crates/check/src/properties/face_integrator.rs`（`build_face_uv_holes` 新增、`integrate_face` 五分支传参、`integrate_with_trimming` 与 `integrate_parametric_trimmed` 签名扩参 + composite quadrature + 孔洞排除、`face_uv_bounds` 文档注释更新、三条测试用例）。
+
+---
+
 ## 0. 许可证隔离红线（所有参与者必读）
 
 | 禁止 | 允许 |

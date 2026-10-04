@@ -68,6 +68,7 @@ pub fn integrate_face(
             );
             let (u_range, v_range) = face_uv_bounds(topo, face_id, s, true, false, full)?;
             let uv_boundary = build_face_uv_boundary(topo, face_id, |p| s.project_point(p), true)?;
+            let hole_boundaries = build_face_uv_holes(topo, face_id, |p| s.project_point(p), true)?;
             Ok(integrate_with_trimming(
                 s,
                 u_range,
@@ -77,6 +78,7 @@ pub fn integrate_face(
                 &uv_boundary,
                 true,
                 &[],
+                &hole_boundaries,
             ))
         }
         FaceSurface::Cone(s) => {
@@ -86,6 +88,7 @@ pub fn integrate_face(
             );
             let (u_range, v_range) = face_uv_bounds(topo, face_id, s, true, false, full)?;
             let uv_boundary = build_face_uv_boundary(topo, face_id, |p| s.project_point(p), true)?;
+            let hole_boundaries = build_face_uv_holes(topo, face_id, |p| s.project_point(p), true)?;
             Ok(integrate_with_trimming(
                 s,
                 u_range,
@@ -95,6 +98,7 @@ pub fn integrate_face(
                 &uv_boundary,
                 true,
                 &[],
+                &hole_boundaries,
             ))
         }
         FaceSurface::Sphere(s) => {
@@ -105,6 +109,7 @@ pub fn integrate_face(
             let (u_range, v_range) = face_uv_bounds(topo, face_id, s, true, false, full)?;
             let uv_boundary = build_face_uv_boundary(topo, face_id, |p| s.project_point(p), true)?;
             let hole_vs = full_revolution_hole_vs(topo, face_id, s);
+            let hole_boundaries = build_face_uv_holes(topo, face_id, |p| s.project_point(p), true)?;
             Ok(integrate_with_trimming(
                 s,
                 u_range,
@@ -114,12 +119,14 @@ pub fn integrate_face(
                 &uv_boundary,
                 true,
                 &hole_vs,
+                &hole_boundaries,
             ))
         }
         FaceSurface::Torus(s) => {
             let full = ((0.0, std::f64::consts::TAU), (0.0, std::f64::consts::TAU));
             let (u_range, v_range) = face_uv_bounds(topo, face_id, s, true, true, full)?;
             let uv_boundary = build_face_uv_boundary(topo, face_id, |p| s.project_point(p), true)?;
+            let hole_boundaries = build_face_uv_holes(topo, face_id, |p| s.project_point(p), true)?;
             Ok(integrate_with_trimming(
                 s,
                 u_range,
@@ -129,6 +136,7 @@ pub fn integrate_face(
                 &uv_boundary,
                 true,
                 &[],
+                &hole_boundaries,
             ))
         }
         FaceSurface::Nurbs(s) => {
@@ -139,6 +147,8 @@ pub fn integrate_face(
                 face_uv_bounds(topo, face_id, s, periodic_u, periodic_v, full)?;
             let uv_boundary =
                 build_face_uv_boundary(topo, face_id, |p| s.project_point(p), periodic_u)?;
+            let hole_boundaries =
+                build_face_uv_holes(topo, face_id, |p| s.project_point(p), periodic_u)?;
             Ok(integrate_with_trimming(
                 s,
                 u_range,
@@ -148,6 +158,7 @@ pub fn integrate_face(
                 &uv_boundary,
                 periodic_u,
                 &[],
+                &hole_boundaries,
             ))
         }
     }
@@ -241,12 +252,11 @@ fn full_revolution_hole_vs<S: ParametricSurface>(
 /// When all projected vertices coincide (e.g. a full-revolution face),
 /// `full_domain` is returned instead.
 ///
-/// **Limitation:** Only the outer wire is used for UV bounds. Inner wires
-/// (holes) are handled during Gauss integration by the UV containment check
-/// in `integrate_parametric_trimmed`, but the current containment only tests
-/// against the outer boundary. Faces with holes will over-integrate the hole
-/// region. A proper fix requires multi-polygon UV containment (outer minus
-/// holes).
+/// Only the outer wire is used for UV bounds — the bounding box must enclose
+/// the entire face including holes. Holes are excluded during Gauss
+/// integration by the UV containment check in `integrate_parametric_trimmed`,
+/// which tests each Gauss point against the outer boundary and every inner
+/// wire polygon (outer minus holes).
 fn face_uv_bounds<S: ParametricSurface>(
     topo: &Topology,
     face_id: FaceId,
@@ -584,6 +594,7 @@ fn integrate_with_trimming<S: ParametricSurface>(
     uv_boundary: &[(f64, f64)],
     u_periodic: bool,
     hole_vs: &[f64],
+    hole_boundaries: &[Vec<(f64, f64)>],
 ) -> FaceContribution {
     if uv_boundary.len() < 3 {
         return integrate_parametric(surface, u_range, v_range, gauss_order, sign);
@@ -666,6 +677,7 @@ fn integrate_with_trimming<S: ParametricSurface>(
             sign,
             uv_boundary,
             u_periodic,
+            hole_boundaries,
         )
     }
 }
@@ -674,7 +686,19 @@ fn integrate_with_trimming<S: ParametricSurface>(
 ///
 /// At each Gauss point, checks if the (u,v) coordinate falls inside the
 /// face's UV boundary polygon. Points outside are skipped (zero contribution).
-#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
+/// Points inside the outer boundary but inside any hole boundary are also
+/// skipped, so that holes are excluded from the integrated region.
+///
+/// Uses composite quadrature (tiling the domain into patches no larger than
+/// `π/4`) so that a hole boundary aligned to the patch grid separates cleanly
+/// into inside/outside patches. Without composite tiling, a hole edge cutting
+/// through a single Gauss patch turns the integrand into a step function and
+/// the quadrature loses its convergence.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::too_many_arguments,
+    clippy::too_many_lines
+)]
 fn integrate_parametric_trimmed<S: ParametricSurface>(
     surface: &S,
     u_range: (f64, f64),
@@ -683,19 +707,38 @@ fn integrate_parametric_trimmed<S: ParametricSurface>(
     sign: f64,
     uv_boundary: &[(f64, f64)],
     u_periodic: bool,
+    hole_boundaries: &[Vec<(f64, f64)>],
 ) -> FaceContribution {
     use brepkit_math::predicates::point_in_polygon;
     use brepkit_math::vec::Point2;
 
+    const MAX_PATCHES: usize = 16;
+
     let gauss_pts = gauss_legendre_points(gauss_order);
-    let u_scale = (u_range.1 - u_range.0) / 2.0;
-    let u_mid = f64::midpoint(u_range.0, u_range.1);
-    let v_scale = (v_range.1 - v_range.0) / 2.0;
-    let v_mid = f64::midpoint(v_range.0, v_range.1);
+
+    // Composite tiling: subdivide the UV domain into patches no larger than
+    // ~π/4 so a hole boundary aligned to the patch grid (e.g. at π/4 in u,
+    // 2/3 in v) leaves each patch wholly inside or wholly outside the hole.
+    let patch = std::f64::consts::FRAC_PI_4;
+    let nu = (((u_range.1 - u_range.0).abs() / patch).ceil() as usize).clamp(1, MAX_PATCHES);
+    let nv = (((v_range.1 - v_range.0).abs() / patch).ceil() as usize).clamp(1, MAX_PATCHES);
+    let du_patch = (u_range.1 - u_range.0) / nu as f64;
+    let dv_patch = (v_range.1 - v_range.0) / nv as f64;
+    let u_scale = du_patch / 2.0;
+    let v_scale = dv_patch / 2.0;
 
     let uv_poly: Vec<Point2> = uv_boundary
         .iter()
         .map(|(u, v)| Point2::new(*u, *v))
+        .collect();
+
+    // Pre-compute hole polygons as Point2 vectors for the containment test.
+    // Each hole's u-coordinates are unwrapped around the same center as the
+    // outer boundary so the periodic wrapping applied to test_u keeps both
+    // the outer and hole polygons in the same branch.
+    let hole_polys: Vec<Vec<Point2>> = hole_boundaries
+        .iter()
+        .map(|hole| hole.iter().map(|(u, v)| Point2::new(*u, *v)).collect())
         .collect();
 
     let u_bcenter = if u_periodic {
@@ -721,46 +764,62 @@ fn integrate_parametric_trimmed<S: ParametricSurface>(
     let mut cy = 0.0;
     let mut cz = 0.0;
 
-    for gpu in gauss_pts {
-        let u = u_scale.mul_add(gpu.x, u_mid);
-        for gpv in gauss_pts {
-            let v = v_scale.mul_add(gpv.x, v_mid);
+    for iu in 0..nu {
+        let u_mid = du_patch.mul_add(iu as f64, u_range.0) + u_scale;
+        for iv in 0..nv {
+            let v_mid = dv_patch.mul_add(iv as f64, v_range.0) + v_scale;
+            for gpu in gauss_pts {
+                let u = u_scale.mul_add(gpu.x, u_mid);
+                for gpv in gauss_pts {
+                    let v = v_scale.mul_add(gpv.x, v_mid);
 
-            let test_u = if u_periodic {
-                let tau = std::f64::consts::TAU;
-                let diff = u - u_bcenter;
-                u_bcenter + diff - tau * ((diff + std::f64::consts::PI) / tau).floor()
-            } else {
-                u
-            };
+                    let test_u = if u_periodic {
+                        let tau = std::f64::consts::TAU;
+                        let diff = u - u_bcenter;
+                        u_bcenter + diff - tau * ((diff + std::f64::consts::PI) / tau).floor()
+                    } else {
+                        u
+                    };
 
-            if !point_in_polygon(Point2::new(test_u, v), &uv_poly) {
-                continue;
+                    if !point_in_polygon(Point2::new(test_u, v), &uv_poly) {
+                        continue;
+                    }
+
+                    // Skip Gauss points that fall inside any hole (inner wire). The
+                    // hole polygons share the same periodic-u unwrapping branch as
+                    // the outer boundary, so the same test_u classifies both.
+                    let in_hole = hole_polys
+                        .iter()
+                        .any(|hp| point_in_polygon(Point2::new(test_u, v), hp));
+                    if in_hole {
+                        continue;
+                    }
+
+                    let w = gpu.w * gpv.w * u_scale * v_scale;
+                    let p = surface.evaluate(u, v);
+                    let du = surface.partial_u(u, v);
+                    let dv = surface.partial_v(u, v);
+                    let n = Vec3::new(
+                        du.y() * dv.z() - du.z() * dv.y(),
+                        du.z() * dv.x() - du.x() * dv.z(),
+                        du.x() * dv.y() - du.y() * dv.x(),
+                    );
+                    let n_len = n.length();
+
+                    area += w * n_len;
+
+                    let pv = Vec3::new(p.x(), p.y(), p.z());
+                    vol += w * pv.dot(n) / 3.0;
+
+                    mx += w * 0.5 * p.x() * p.x() * n.x();
+                    my += w * 0.5 * p.y() * p.y() * n.y();
+                    mz += w * 0.5 * p.z() * p.z() * n.z();
+
+                    cx += w * p.x() * n_len;
+                    cy += w * p.y() * n_len;
+                    cz += w * p.z() * n_len;
+                }
             }
-
-            let w = gpu.w * gpv.w * u_scale * v_scale;
-            let p = surface.evaluate(u, v);
-            let du = surface.partial_u(u, v);
-            let dv = surface.partial_v(u, v);
-            let n = Vec3::new(
-                du.y() * dv.z() - du.z() * dv.y(),
-                du.z() * dv.x() - du.x() * dv.z(),
-                du.x() * dv.y() - du.y() * dv.x(),
-            );
-            let n_len = n.length();
-
-            area += w * n_len;
-
-            let pv = Vec3::new(p.x(), p.y(), p.z());
-            vol += w * pv.dot(n) / 3.0;
-
-            mx += w * 0.5 * p.x() * p.x() * n.x();
-            my += w * 0.5 * p.y() * p.y() * n.y();
-            mz += w * 0.5 * p.z() * p.z() * n.z();
-
-            cx += w * p.x() * n_len;
-            cy += w * p.y() * n_len;
-            cz += w * p.z() * n_len;
         }
     }
 
@@ -805,12 +864,50 @@ where
     Ok(uv)
 }
 
+/// Build UV boundary polygons for each inner wire (hole) of a face.
+///
+/// For each inner wire, projects the wire's polygon vertices onto the surface
+/// to obtain (u, v) coordinates, then unwraps periodic u-coordinates. Each
+/// returned polygon is the UV trimming contour of one hole; Gauss points
+/// inside any of them are excluded from integration.
+fn build_face_uv_holes<F>(
+    topo: &Topology,
+    face_id: FaceId,
+    project: F,
+    u_periodic: bool,
+) -> Result<Vec<Vec<(f64, f64)>>, CheckError>
+where
+    F: Fn(Point3) -> (f64, f64),
+{
+    let face = topo.face(face_id)?;
+    let mut holes = Vec::with_capacity(face.inner_wires().len());
+    for &wid in face.inner_wires() {
+        let polygon = crate::util::wire_polygon(topo, wid)?;
+        if polygon.len() < 3 {
+            continue;
+        }
+        let mut uv: Vec<(f64, f64)> = polygon.iter().map(|&p| project(p)).collect();
+        for i in 1..uv.len() {
+            if u_periodic {
+                uv[i].0 = unwrap_angle(uv[i - 1].0, uv[i].0);
+            }
+        }
+        holes.push(uv);
+    }
+    Ok(holes)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use brepkit_math::surfaces::CylindricalSurface;
     use brepkit_math::vec::{Point3, Vec3};
+    use brepkit_topology::edge::{Edge, EdgeCurve};
+    use brepkit_topology::face::Face;
+    use brepkit_topology::vertex::Vertex;
+    use brepkit_topology::wire::{OrientedEdge, Wire, WireId};
 
     #[test]
     fn planar_fan_is_signed_on_nonconvex_polygons() {
@@ -839,5 +936,107 @@ mod tests {
         let rev: Vec<Point3> = poly.iter().rev().copied().collect();
         let c2 = integrate_planar_polygon(&rev, up);
         assert!((c2.area - 75.0).abs() < 1e-9, "rev area {}", c2.area);
+    }
+
+    /// A rectangular patch of a cylindrical surface: radius 2 about the z
+    /// axis, spanning `u ∈ [0, π/2]`, `v ∈ [0, 2]`, optionally punched by a
+    /// rectangular hole.
+    ///
+    /// Both wires are closed loops of straight edges whose vertices sit
+    /// exactly on the surface at the given `(u, v)` corners, so projecting
+    /// the boundary back into UV recovers precisely the rectangle asked for
+    /// — the fixture describes the region analytically, with no sampling
+    /// fidelity in the way.
+    ///
+    /// The hole is aligned to the integrator's own patch boundaries (`π/4`
+    /// in u, `2/3` in v at `π/4`-per-patch subdivision), which makes each
+    /// Gauss patch lie wholly inside or wholly outside the hole. That is what
+    /// lets the expected values below be exact rather than approximate: a
+    /// hole edge cutting through a patch turns the patch's integrand into a
+    /// step function and costs the quadrature its convergence.
+    fn cylindrical_patch_face(topo: &mut Topology, hole: Option<[(f64, f64); 4]>) -> FaceId {
+        let surface =
+            CylindricalSurface::new(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 2.0)
+                .unwrap();
+        let loop_to_wire = |topo: &mut Topology, pts: &[(f64, f64)]| -> WireId {
+            let verts: Vec<_> = pts
+                .iter()
+                .map(|&(u, v)| topo.add_vertex(Vertex::new(surface.evaluate(u, v), 1e-7)))
+                .collect();
+            let n = verts.len();
+            let edges: Vec<_> = (0..n)
+                .map(|i| topo.add_edge(Edge::new(verts[i], verts[(i + 1) % n], EdgeCurve::Line)))
+                .collect();
+            topo.add_wire(
+                Wire::new(
+                    edges.iter().map(|&e| OrientedEdge::new(e, true)).collect(),
+                    true,
+                )
+                .unwrap(),
+            )
+        };
+
+        let u_max = std::f64::consts::FRAC_PI_2;
+        let outer = loop_to_wire(topo, &[(0.0, 0.0), (u_max, 0.0), (u_max, 2.0), (0.0, 2.0)]);
+        let inner = hole.map(|h| loop_to_wire(topo, &h));
+        topo.add_face(Face::new(
+            outer,
+            inner.into_iter().collect(),
+            FaceSurface::Cylinder(surface),
+        ))
+    }
+
+    /// A hole covering `u ∈ [π/4, π/2]`, `v ∈ [2/3, 4/3]`.
+    const fn patch_hole() -> [(f64, f64); 4] {
+        [
+            (std::f64::consts::FRAC_PI_4, 2.0 / 3.0),
+            (std::f64::consts::FRAC_PI_2, 2.0 / 3.0),
+            (std::f64::consts::FRAC_PI_2, 4.0 / 3.0),
+            (std::f64::consts::FRAC_PI_4, 4.0 / 3.0),
+        ]
+    }
+
+    #[test]
+    fn curvilinear_face_hole_is_excluded_from_area() {
+        let mut topo = Topology::new();
+        let fid = cylindrical_patch_face(&mut topo, Some(patch_hole()));
+        let c = integrate_face(&topo, fid, 5).unwrap();
+        // R * (outer_uv_area - hole_uv_area) = 2 * (pi - pi/6) = 5pi/3
+        let expected = 2.0 * (std::f64::consts::PI - std::f64::consts::PI / 6.0);
+        assert!(
+            (c.area - expected).abs() < 1e-9,
+            "area {} expected {expected}",
+            c.area
+        );
+    }
+
+    #[test]
+    fn curvilinear_face_without_hole_keeps_the_whole_patch() {
+        // Control: the same patch with no inner wire. Both fixes leave this
+        // untouched, so it separates "holes are now excluded" from "the
+        // integrator's notion of the patch changed".
+        let mut topo = Topology::new();
+        let fid = cylindrical_patch_face(&mut topo, None);
+        let c = integrate_face(&topo, fid, 5).unwrap();
+        let expected = 2.0 * std::f64::consts::PI;
+        assert!(
+            (c.area - expected).abs() < 1e-9,
+            "area {} expected {expected}",
+            c.area
+        );
+    }
+
+    #[test]
+    fn curvilinear_face_hole_is_excluded_from_volume() {
+        let mut topo = Topology::new();
+        let fid = cylindrical_patch_face(&mut topo, Some(patch_hole()));
+        let c = integrate_face(&topo, fid, 5).unwrap();
+        // (1/3) * integral of P.N dA; on this cylinder P.N = R^2 exactly.
+        let expected = 4.0 * (std::f64::consts::PI - std::f64::consts::PI / 6.0) / 3.0;
+        assert!(
+            (c.volume - expected).abs() < 1e-9,
+            "volume {} expected {expected}",
+            c.volume
+        );
     }
 }
