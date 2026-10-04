@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791075249296,
+  "lastUpdate": 1791133655569,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -971,6 +971,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24833383,
             "range": "± 211536",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "68463444bdf6e21c3a5129bfa0db28ea085a32e2",
+          "message": "fix(algo): exact ray-cast classification for circular face boundaries\n\ncrates/algo sampled circular edges into chords, so every chord cut inside\nthe arc and the sliver between them was classified the other way round --\n233 of 360 probe angles wrong at r=0.99 on a circular hole (65%), matching\nthe cis(pi/17)=0.9830 inscribed radius of the 17-chord polygon.\n\nwire_polygon now returns a WireRegion carrying the bulge of each chord\nalongside the polygon, and containment flips once per bulge a point falls\nin. The geometry itself moves to brepkit_math::arc_bulge so the existing\ncheck implementation shares one criterion instead of duplicating it.\n\nTesteds by three failing cases plus a control that stays green, including\nan open-arc fixture that takes the coarser 3-sample path.",
+          "timestamp": "2026-10-05T00:46:12+08:00",
+          "tree_id": "843a4f5d370ac5a8e9c6516192ccd0a9b3b0c7c8",
+          "url": "https://github.com/Faicad/brepkit2/commit/68463444bdf6e21c3a5129bfa0db28ea085a32e2"
+        },
+        "date": 1791133655173,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 955667,
+            "range": "± 4420",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1035479,
+            "range": "± 3349",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11730,
+            "range": "± 284",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 710652,
+            "range": "± 1368",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 25075940,
+            "range": "± 54005",
             "unit": "ns/iter"
           }
         ]
