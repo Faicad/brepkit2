@@ -70,6 +70,7 @@ pub enum MathError {
 
 pub mod aabb;
 pub mod analytic_intersection;
+pub mod arc_bulge;
 pub mod bvh;
 pub mod cdt;
 pub mod chord;

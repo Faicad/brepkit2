@@ -151,7 +151,7 @@ pub fn classify_coincident_coplanar(
         let mut any_strictly_inside = false;
         let mut deepest_outside: Option<(f64, Point3)> = None;
         for &v in &sub_verts {
-            let dist = dist_to_polygon_boundary(v, &outer, &region_normal);
+            let dist = dist_to_polygon_boundary(v, &outer.polygon, &region_normal);
             if dist <= plane_tol {
                 continue;
             }
@@ -231,7 +231,7 @@ pub fn classify_coincident_coplanar(
             // Must still be strictly outside the opposing region and clear of
             // its boundary, else the probe is meaningless.
             if point_in_planar_region(probe_xy, &outer, &holes, &region_normal)
-                || dist_to_polygon_boundary(probe_xy, &outer, &region_normal) <= probe
+                || dist_to_polygon_boundary(probe_xy, &outer.polygon, &region_normal) <= probe
             {
                 continue;
             }

@@ -7,6 +7,7 @@
 //! logic. Bug fixes should be applied here first; the operations copy
 //! will be deleted during the GFA step 5 switchover.
 
+use brepkit_math::arc_bulge::ArcBulge;
 use brepkit_math::predicates::point_in_polygon;
 use brepkit_math::tolerance::Tolerance;
 use brepkit_math::vec::{Point2, Point3, Vec3};
@@ -18,11 +19,11 @@ use crate::error::AlgoError;
 
 /// Per-face geometry used for ray crossing tests.
 enum FaceGeom {
-    /// A planar (or planar-approximated) face: boundary polygon, hole
-    /// polygons, and the supporting plane.
+    /// A planar (or planar-approximated) face: boundary region, hole
+    /// regions, and the supporting plane.
     Planar {
-        verts: Vec<Point3>,
-        holes: Vec<Vec<Point3>>,
+        outer: WireRegion,
+        holes: Vec<WireRegion>,
         normal: Vec3,
         d: f64,
     },
@@ -347,6 +348,43 @@ fn dist_to_polygon_boundary(p: Point3, verts: &[Point3]) -> f64 {
     best
 }
 
+/// One polygonised boundary loop: the sampled polygon plus the slivers its
+/// circular edges stand in for.
+///
+/// The polygon inscribes every arc it stands for, so it disagrees with the
+/// true boundary on exactly the slivers between chord and arc — see
+/// [`ArcBulge`]. Carrying them keeps the polygon cheap while containment
+/// stays exact for circular boundaries, which extra sampling can never
+/// achieve (it only shrinks the disagreement).
+#[derive(Debug, Clone, Default)]
+pub struct WireRegion {
+    /// The sampled loop, in traversal order.
+    pub polygon: Vec<Point3>,
+    /// Slivers between the polygon's chords and the true circular arcs.
+    pub bulges: Vec<ArcBulge>,
+}
+
+impl WireRegion {
+    /// Whether `point` lies inside the loop, corrected for its curved edges.
+    ///
+    /// Answers the polygon test, then inverts the answer once per sliver the
+    /// point falls inside. The polygon and the true loop differ by exactly
+    /// the slivers, so a point inside one is classified the wrong way round
+    /// by the polygon — whether the sliver belongs to the region (a convex
+    /// arc, cut off by its chord) or is excluded from it (a concave arc,
+    /// closed off by its chord). In both cases inverting is the correction.
+    #[must_use]
+    pub fn contains(&self, point: Point3, normal: &Vec3) -> bool {
+        let mut inside = point_in_face_3d(point, &self.polygon, normal);
+        for bulge in &self.bulges {
+            if bulge.contains(point) {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+}
+
 /// Sample a wire into a polygon by geometrically chaining its edges.
 ///
 /// Wires are not guaranteed to list edges in traversal order (primitive
@@ -358,9 +396,25 @@ fn wire_polygon(
     topo: &Topology,
     wire_id: brepkit_topology::wire::WireId,
 ) -> Result<Vec<Point3>, AlgoError> {
+    Ok(wire_region(topo, wire_id)?.polygon)
+}
+
+/// Sample a wire into a [`WireRegion`]: the polygon plus the slivers its
+/// circular edges stand in for — see [`wire_polygon`] for the traversal
+/// rules.
+///
+/// # Errors
+///
+/// Returns [`AlgoError`] if any topology entity referenced by the wire is
+/// missing.
+fn wire_region(
+    topo: &Topology,
+    wire_id: brepkit_topology::wire::WireId,
+) -> Result<WireRegion, AlgoError> {
     let wire = topo.wire(wire_id)?;
 
     let mut polylines: Vec<Vec<Point3>> = Vec::with_capacity(wire.edges().len());
+    let mut bulges: Vec<ArcBulge> = Vec::new();
     for oe in wire.edges() {
         let edge = topo.edge(oe.edge())?;
         let raw_start = topo.vertex(edge.start())?.point();
@@ -379,6 +433,15 @@ fn wire_polygon(
         if !oe.is_forward() {
             pts.reverse();
         }
+        // Every chord of this edge's polyline stands for an arc of the same
+        // circle; record the sliver between them. Chords never straddle two
+        // edges (chaining drops the shared endpoint), and reversing a
+        // polyline leaves the chord set unchanged.
+        if let brepkit_topology::edge::EdgeCurve::Circle(c) = edge.curve() {
+            for w in pts.windows(2) {
+                bulges.extend(ArcBulge::new(w[0], w[1], c));
+            }
+        }
         polylines.push(pts);
     }
 
@@ -386,7 +449,7 @@ fn wire_polygon(
     let mut used = vec![false; polylines.len()];
     let mut verts: Vec<Point3> = Vec::new();
     let Some(first) = polylines.first() else {
-        return Ok(verts);
+        return Ok(WireRegion::default());
     };
     verts.extend_from_slice(first);
     used[0] = true;
@@ -433,7 +496,10 @@ fn wire_polygon(
             verts.pop();
         }
     }
-    Ok(verts)
+    Ok(WireRegion {
+        polygon: verts,
+        bulges,
+    })
 }
 
 /// Collect per-face ray-cast geometry from a solid.
@@ -644,15 +710,15 @@ fn collect_face_geoms(topo: &Topology, solid: SolidId) -> Result<Vec<FaceGeom>, 
             }
         }
 
-        let verts = wire_polygon(topo, face.outer_wire())?;
-        if verts.len() < 3 {
+        let verts = wire_region(topo, face.outer_wire())?;
+        if verts.polygon.len() < 3 {
             continue;
         }
 
         let mut holes = Vec::with_capacity(face.inner_wires().len());
         for &iw in face.inner_wires() {
-            let hole = wire_polygon(topo, iw)?;
-            if hole.len() >= 3 {
+            let hole = wire_region(topo, iw)?;
+            if hole.polygon.len() >= 3 {
                 holes.push(hole);
             }
         }
@@ -661,7 +727,7 @@ fn collect_face_geoms(topo: &Topology, solid: SolidId) -> Result<Vec<FaceGeom>, 
             if let brepkit_topology::face::FaceSurface::Plane { normal, .. } = face.surface() {
                 *normal
             } else {
-                newell_normal(&verts)
+                newell_normal(&verts.polygon)
             };
         let normal = if face.is_reversed() {
             -raw_normal
@@ -669,9 +735,9 @@ fn collect_face_geoms(topo: &Topology, solid: SolidId) -> Result<Vec<FaceGeom>, 
             raw_normal
         };
 
-        let d = dot_normal_point(normal, verts[0]);
+        let d = dot_normal_point(normal, verts.polygon[0]);
         result.push(FaceGeom::Planar {
-            verts,
+            outer: verts,
             holes,
             normal,
             d,
@@ -736,11 +802,11 @@ fn ray_geom_crossings(
 ) -> (i32, bool) {
     match geom {
         FaceGeom::Planar {
-            verts,
+            outer,
             holes,
             normal,
             d,
-        } => ray_face_crossing(origin, ray_dir, verts, holes, *normal, *d, tol),
+        } => ray_face_crossing(origin, ray_dir, outer, holes, *normal, *d, tol),
         FaceGeom::Cylinder {
             surface,
             v_min,
@@ -776,8 +842,8 @@ fn ray_geom_crossings(
 fn ray_face_crossing(
     origin: Point3,
     ray_dir: Vec3,
-    verts: &[Point3],
-    holes: &[Vec<Point3>],
+    outer: &WireRegion,
+    holes: &[WireRegion],
     normal: Vec3,
     d: f64,
     tol: Tolerance,
@@ -801,14 +867,11 @@ fn ray_face_crossing(
         origin.y() + ray_dir.y() * t,
         origin.z() + ray_dir.z() * t,
     );
-    let boundary_graze = dist_to_polygon_boundary(hit, verts) <= near
+    let boundary_graze = dist_to_polygon_boundary(hit, &outer.polygon) <= near
         || holes
             .iter()
-            .any(|h| dist_to_polygon_boundary(hit, h) <= near);
-    if !point_in_face_3d(hit, verts, &normal) {
-        return (0, boundary_graze);
-    }
-    if holes.iter().any(|h| point_in_face_3d(hit, h, &normal)) {
+            .any(|h| dist_to_polygon_boundary(hit, &h.polygon) <= near);
+    if !point_in_planar_region(hit, outer, holes, &normal) {
         return (0, boundary_graze);
     }
     (1, boundary_graze)
@@ -1111,13 +1174,13 @@ fn dot_normal_point(n: Vec3, p: Point3) -> f64 {
     n.dot(Vec3::new(p.x(), p.y(), p.z()))
 }
 
-/// A planar face's sampled boundary: `(outer_polygon, hole_polygons, normal)`.
-pub type FacePolygons = (Vec<Point3>, Vec<Vec<Point3>>, Vec3);
+/// A planar face's sampled boundary: `(outer_region, hole_regions, normal)`.
+pub type FacePolygons = (WireRegion, Vec<WireRegion>, Vec3);
 
-/// Build a planar face's boundary as `(outer_polygon, hole_polygons, normal)`.
+/// Build a planar face's boundary as `(outer_region, hole_regions, normal)`.
 ///
 /// The outer wire and inner wires are sampled into polylines (arcs densified
-/// via `wire_polygon`) so a rounded-corner cap's true region is captured.
+/// via `wire_region`) so a rounded-corner cap's true region is captured.
 /// Returns `None` if the outer polygon is degenerate (< 3 points).
 ///
 /// # Errors
@@ -1128,15 +1191,15 @@ pub fn planar_face_polygons(
     face_id: brepkit_topology::face::FaceId,
 ) -> Result<Option<FacePolygons>, AlgoError> {
     let face = topo.face(face_id)?;
-    let verts = wire_polygon(topo, face.outer_wire())?;
-    if verts.len() < 3 {
+    let verts = wire_region(topo, face.outer_wire())?;
+    if verts.polygon.len() < 3 {
         return Ok(None);
     }
     let raw_normal =
         if let brepkit_topology::face::FaceSurface::Plane { normal, .. } = face.surface() {
             *normal
         } else {
-            newell_normal(&verts)
+            newell_normal(&verts.polygon)
         };
     let normal = if face.is_reversed() {
         -raw_normal
@@ -1145,8 +1208,8 @@ pub fn planar_face_polygons(
     };
     let mut holes = Vec::with_capacity(face.inner_wires().len());
     for &iw in face.inner_wires() {
-        let hole = wire_polygon(topo, iw)?;
-        if hole.len() >= 3 {
+        let hole = wire_region(topo, iw)?;
+        if hole.polygon.len() >= 3 {
             holes.push(hole);
         }
     }
@@ -1154,18 +1217,21 @@ pub fn planar_face_polygons(
 }
 
 /// Test whether `point` lies inside the planar face's region (inside the outer
-/// polygon and outside every hole), projecting along the face normal.
+/// loop and outside every hole), projecting along the face normal.
+///
+/// Curved boundaries are honoured exactly rather than through their chords:
+/// see [`WireRegion::contains`].
 #[must_use]
 pub fn point_in_planar_region(
     point: Point3,
-    outer: &[Point3],
-    holes: &[Vec<Point3>],
+    outer: &WireRegion,
+    holes: &[WireRegion],
     normal: &Vec3,
 ) -> bool {
-    if !point_in_face_3d(point, outer, normal) {
+    if !outer.contains(point, normal) {
         return false;
     }
-    !holes.iter().any(|h| point_in_face_3d(point, h, normal))
+    !holes.iter().any(|h| h.contains(point, normal))
 }
 
 /// Compute the solid-level AABB from boundary vertices.
@@ -1231,11 +1297,11 @@ mod tests {
 
     use super::*;
     use brepkit_topology::edge::{Edge, EdgeCurve};
-    use brepkit_topology::face::{Face, FaceSurface};
+    use brepkit_topology::face::{Face, FaceId, FaceSurface};
     use brepkit_topology::shell::Shell;
     use brepkit_topology::solid::Solid;
     use brepkit_topology::vertex::Vertex;
-    use brepkit_topology::wire::{OrientedEdge, Wire};
+    use brepkit_topology::wire::{OrientedEdge, Wire, WireId};
 
     /// Build a degenerate solid where all faces have < 3 vertices
     /// (single-edge faces). This tests the empty polygon fallback.
@@ -1373,6 +1439,204 @@ mod tests {
         ];
         let shell = topo.add_shell(Shell::new(faces).unwrap());
         topo.add_solid(Solid::new(shell, vec![]))
+    }
+
+    /// A closed circular wire in the `z = 0` plane, centred at `center`.
+    fn add_circle_wire(topo: &mut Topology, center: Point3, radius: f64) -> WireId {
+        let circle =
+            brepkit_math::curves::Circle3D::new(center, Vec3::new(0.0, 0.0, 1.0), radius).unwrap();
+        let seam = circle.evaluate(0.0);
+        let v0 = topo.add_vertex(Vertex::new(seam, 1e-7));
+        let e = topo.add_edge(Edge::new(v0, v0, EdgeCurve::Circle(circle)));
+        topo.add_wire(Wire::new(vec![OrientedEdge::new(e, true)], true).unwrap())
+    }
+
+    /// A disc planar face at `z = 0`: circular outer boundary, no holes.
+    fn make_disc_face(topo: &mut Topology, radius: f64) -> FaceId {
+        let wire = add_circle_wire(topo, Point3::new(0.0, 0.0, 0.0), radius);
+        topo.add_face(Face::new(
+            wire,
+            vec![],
+            FaceSurface::Plane {
+                normal: Vec3::new(0.0, 0.0, 1.0),
+                d: 0.0,
+            },
+        ))
+    }
+
+    /// A square planar face `[-2,2]^2` at `z = 0` with a concentric round hole.
+    fn make_square_face_with_round_hole(topo: &mut Topology, hole_radius: f64) -> FaceId {
+        let v = [
+            topo.add_vertex(Vertex::new(Point3::new(-2.0, -2.0, 0.0), 1e-7)),
+            topo.add_vertex(Vertex::new(Point3::new(2.0, -2.0, 0.0), 1e-7)),
+            topo.add_vertex(Vertex::new(Point3::new(2.0, 2.0, 0.0), 1e-7)),
+            topo.add_vertex(Vertex::new(Point3::new(-2.0, 2.0, 0.0), 1e-7)),
+        ];
+        let mut line = |a: usize, b: usize| -> brepkit_topology::edge::EdgeId {
+            topo.add_edge(Edge::new(v[a], v[b], EdgeCurve::Line))
+        };
+        let e01 = line(0, 1);
+        let e12 = line(1, 2);
+        let e23 = line(2, 3);
+        let e30 = line(3, 0);
+        let outer = topo.add_wire(
+            Wire::new(
+                vec![
+                    OrientedEdge::new(e01, true),
+                    OrientedEdge::new(e12, true),
+                    OrientedEdge::new(e23, true),
+                    OrientedEdge::new(e30, true),
+                ],
+                true,
+            )
+            .unwrap(),
+        );
+        let inner = add_circle_wire(topo, Point3::new(0.0, 0.0, 0.0), hole_radius);
+        topo.add_face(Face::new(
+            outer,
+            vec![inner],
+            FaceSurface::Plane {
+                normal: Vec3::new(0.0, 0.0, 1.0),
+                d: 0.0,
+            },
+        ))
+    }
+
+    /// A quarter-disc planar face at `z = 0`: two radii from the centre plus
+    /// the arc between them.
+    ///
+    /// Exercises the *open* arc path, which samples the arc at three interior
+    /// points — far coarser than the full circle's sixteen, so its chords cut
+    /// deeper.
+    fn make_quarter_disc_face(topo: &mut Topology, radius: f64) -> FaceId {
+        let a = topo.add_vertex(Vertex::new(Point3::new(radius, 0.0, 0.0), 1e-7));
+        let b = topo.add_vertex(Vertex::new(Point3::new(0.0, radius, 0.0), 1e-7));
+        let o = topo.add_vertex(Vertex::new(Point3::new(0.0, 0.0, 0.0), 1e-7));
+        let circle = brepkit_math::curves::Circle3D::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            radius,
+        )
+        .unwrap();
+        let arc = topo.add_edge(Edge::new(a, b, EdgeCurve::Circle(circle)));
+        let bo = topo.add_edge(Edge::new(b, o, EdgeCurve::Line));
+        let oa = topo.add_edge(Edge::new(o, a, EdgeCurve::Line));
+        let wire = topo.add_wire(
+            Wire::new(
+                vec![
+                    OrientedEdge::new(arc, true),
+                    OrientedEdge::new(bo, true),
+                    OrientedEdge::new(oa, true),
+                ],
+                true,
+            )
+            .unwrap(),
+        );
+        topo.add_face(Face::new(
+            wire,
+            vec![],
+            FaceSurface::Plane {
+                normal: Vec3::new(0.0, 0.0, 1.0),
+                d: 0.0,
+            },
+        ))
+    }
+
+    /// Sweep a full turn at `radius` on `face` and count how many of the 360
+    /// samples disagree with the analytic answer `expected`.
+    fn sweep_region_errors(topo: &Topology, face: FaceId, radius: f64, expected: bool) -> usize {
+        let (outer, holes, normal) = planar_face_polygons(topo, face)
+            .unwrap()
+            .expect("fixture face must have a usable boundary polygon");
+        let mut wrong = 0;
+        for k in 0..360 {
+            let a = f64::from(k) * std::f64::consts::TAU / 360.0;
+            let p = Point3::new(radius * a.cos(), radius * a.sin(), 0.0);
+            if point_in_planar_region(p, &outer, &holes, &normal) != expected {
+                wrong += 1;
+            }
+        }
+        wrong
+    }
+
+    /// A point one hundredth inside the true hole is *outside* the face's
+    /// material: the polygon inscribes the circle, so every chord cuts the
+    /// hole short and the sliver between chord and arc reads as material.
+    #[test]
+    fn round_hole_sliver_is_outside_the_region() {
+        let mut topo = Topology::default();
+        let face = make_square_face_with_round_hole(&mut topo, 1.0);
+        let wrong = sweep_region_errors(&topo, face, 0.99, false);
+        assert_eq!(
+            wrong, 0,
+            "the sliver just inside a round hole must not count as material"
+        );
+    }
+
+    /// The mirror case: on a disc the same sliver belongs to the material.
+    #[test]
+    fn disc_sliver_is_inside_the_region() {
+        let mut topo = Topology::default();
+        let face = make_disc_face(&mut topo, 1.0);
+        let wrong = sweep_region_errors(&topo, face, 0.99, true);
+        assert_eq!(
+            wrong, 0,
+            "the sliver just inside a round boundary must count as material"
+        );
+    }
+
+    /// The open-arc path samples its arc at three interior points, so the
+    /// chord/arc sliver is several times wider than a full circle's. Points
+    /// just inside the arc are material.
+    #[test]
+    fn quarter_disc_arc_sliver_is_inside_the_region() {
+        let mut topo = Topology::default();
+        let face = make_quarter_disc_face(&mut topo, 1.0);
+        let (outer, holes, normal) = planar_face_polygons(&topo, face)
+            .unwrap()
+            .expect("quarter disc must have a usable boundary polygon");
+        let mut wrong = 0;
+        // 5°..85°: clear of both radii, so the answer is analytic.
+        for k in 5..85 {
+            let a = f64::from(k) * std::f64::consts::PI / 180.0;
+            let p = Point3::new(0.99 * a.cos(), 0.99 * a.sin(), 0.0);
+            if !point_in_planar_region(p, &outer, &holes, &normal) {
+                wrong += 1;
+            }
+        }
+        assert_eq!(
+            wrong, 0,
+            "the sliver just inside an open arc must count as material"
+        );
+    }
+
+    /// Control: away from the boundary both fixtures already agree, so a red
+    /// main case can only come from the curved boundary itself.
+    #[test]
+    fn control_regions_away_from_the_boundary() {
+        let mut topo = Topology::default();
+        let holed = make_square_face_with_round_hole(&mut topo, 1.0);
+        let disc = make_disc_face(&mut topo, 1.0);
+        assert_eq!(
+            sweep_region_errors(&topo, holed, 0.5, false),
+            0,
+            "hole interior is not material"
+        );
+        assert_eq!(
+            sweep_region_errors(&topo, holed, 1.5, true),
+            0,
+            "the annulus around the hole is material"
+        );
+        assert_eq!(
+            sweep_region_errors(&topo, disc, 0.5, true),
+            0,
+            "disc interior is material"
+        );
+        assert_eq!(
+            sweep_region_errors(&topo, disc, 1.5, false),
+            0,
+            "outside the disc is not material"
+        );
     }
 
     #[test]

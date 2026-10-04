@@ -9,6 +9,13 @@ use brepkit_topology::solid::SolidId;
 
 use crate::CheckError;
 
+/// The sliver between one chord of a polygonised arc and the arc itself.
+///
+/// Re-exported from `brepkit_math` so every polygoniser in the workspace
+/// shares one sliver test — a second, silently different copy disagrees at
+/// runtime with no build-time signal.
+pub use brepkit_math::arc_bulge::ArcBulge;
+
 /// Compute the normal of a polygon via Newell's method.
 ///
 /// Returns a unit-length normal, or `(0,0,1)` for degenerate polygons.
@@ -85,66 +92,6 @@ pub fn sample_edge_curve(curve: &EdgeCurve, n: usize) -> Vec<Point3> {
 pub fn face_polygon(topo: &Topology, face_id: FaceId) -> Result<Vec<Point3>, CheckError> {
     let face = topo.face(face_id)?;
     wire_polygon(topo, face.outer_wire())
-}
-
-/// The sliver between one chord of a polygonised arc and the arc itself.
-///
-/// A polygon can only approach a curved boundary from one side: the sampled
-/// points lie *on* the arc, so every chord cuts inside it. Polygon and arc
-/// therefore enclose different regions, and they disagree on exactly these
-/// slivers — for a minor arc (which is what sampling produces) the sliver is
-/// the part of the disc lying beyond the chord.
-///
-/// Since the true region and the polygon differ by precisely the union of
-/// these slivers, a containment answer built on the polygon is exact once it
-/// is inverted for a point falling inside one. Carrying the slivers lets the
-/// polygon stay cheap (a few dozen points) while the test stays exact for
-/// circular boundaries — no amount of extra sampling gets there, because the
-/// error is only ever shrunk, never removed.
-#[derive(Debug, Clone, Copy)]
-pub struct ArcBulge {
-    /// Midpoint of the chord.
-    chord_mid: Point3,
-    /// Unit vector from the arc's centre through the chord midpoint.
-    outward: Vec3,
-    center: Point3,
-    radius_sq: f64,
-}
-
-impl ArcBulge {
-    /// The sliver bounded by the chord `a → b` and the arc of `circle`.
-    ///
-    /// Returns `None` when the chord degenerates (it passes through the
-    /// centre, so "beyond the chord" has no meaning) — such a chord stands
-    /// for a semicircle, which sampling at
-    /// [`CLOSED_CURVE_SAMPLES`] never produces.
-    #[must_use]
-    pub fn new(a: Point3, b: Point3, circle: &brepkit_math::curves::Circle3D) -> Option<Self> {
-        let center = circle.center();
-        let chord_mid = Point3::new(
-            (a.x() + b.x()) * 0.5,
-            (a.y() + b.y()) * 0.5,
-            (a.z() + b.z()) * 0.5,
-        );
-        let out = chord_mid - center;
-        let len = out.length();
-        if len < 1e-12 {
-            return None;
-        }
-        Some(Self {
-            chord_mid,
-            outward: out * (1.0 / len),
-            center,
-            radius_sq: circle.radius() * circle.radius(),
-        })
-    }
-
-    /// Whether `p` lies in the sliver: inside the circle, beyond the chord.
-    #[must_use]
-    pub fn contains(&self, p: Point3) -> bool {
-        (p - self.center).length_squared() < self.radius_sq
-            && (p - self.chord_mid).dot(self.outward) > 0.0
-    }
 }
 
 /// One boundary loop of a face: the polygonised loop plus the slivers its
