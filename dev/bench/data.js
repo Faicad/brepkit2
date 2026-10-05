@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791168292266,
+  "lastUpdate": 1791168753326,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -1079,6 +1079,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 29848853,
             "range": "± 221296",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "05b18c17bb1a1f3ff809732ae69b108902442967",
+          "message": "fix(blend): commit the chamfer corner-patch implementation missing from the test-only commit\n\nThe previous commit shipped the chamfer_corner_patches tests without the\nmatching blend engine changes (flat triangular corner patches wired into\nchamfer_builder), so CI ran the new assertions against the old spherical\npath and failed. This completes the pair: chamfer_corner.rs module,\nchamfer_builder wiring, and removal of the superseded\nchamfer_v2_measurements test file.",
+          "timestamp": "2026-10-05T10:50:11+08:00",
+          "tree_id": "2732e98e30f420dd23bb9ba12542965cd188374e",
+          "url": "https://github.com/Faicad/brepkit2/commit/05b18c17bb1a1f3ff809732ae69b108902442967"
+        },
+        "date": 1791168752580,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 946915,
+            "range": "± 1659",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1023596,
+            "range": "± 2623",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11910,
+            "range": "± 58",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 713026,
+            "range": "± 1488",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24902025,
+            "range": "± 44749",
             "unit": "ns/iter"
           }
         ]
