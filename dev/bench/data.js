@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791133655569,
+  "lastUpdate": 1791168292266,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -1025,6 +1025,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 25075940,
             "range": "± 54005",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "dba4ed5199cfafaa4fef190e5fc0a0c2f4f57043",
+          "message": "fix(ci): resolve rustdoc private-intra-doc-links and clippy lint failures\n\n- Replace the private [`WireRegion::contains`] doc link on public\n  `point_in_planar_region` with plain text (rustdoc -D warnings)\n- Add clippy allow attributes (unwrap_used, print_stdout) to the new\n  diagnostic test files so clippy --all-targets -D warnings passes\n- Hoist a const after statements into a local in chamfer_corner_patches",
+          "timestamp": "2026-10-05T10:12:18+08:00",
+          "tree_id": "44cdaa97c2f7990d83702e28c84e0d592ba690fc",
+          "url": "https://github.com/Faicad/brepkit2/commit/dba4ed5199cfafaa4fef190e5fc0a0c2f4f57043"
+        },
+        "date": 1791168291433,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 1128633,
+            "range": "± 9884",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1232620,
+            "range": "± 25430",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 14776,
+            "range": "± 101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 812580,
+            "range": "± 8312",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 29848853,
+            "range": "± 221296",
             "unit": "ns/iter"
           }
         ]
