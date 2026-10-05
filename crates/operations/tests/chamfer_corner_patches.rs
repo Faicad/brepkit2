@@ -1,11 +1,4 @@
-//! Why `chamfer_v2`'s shell cannot be closed by welding: the corner patches
-//! are never built.
-//!
-//! `chamfer_shell_manifold.rs` pins the *symptom* — every edge free, 18
-//! disconnected components — and names the missing corner patches as the
-//! cause. This file exists so that cause is itself pinned by an assertion
-//! rather than by prose, and so the measurement that exonerates
-//! `sew::weld_faces` can be re-run by anyone.
+//! A chamfered cube's corner budget, and why the corners have to be *built*.
 //!
 //! # What a chamfered cube is
 //!
@@ -22,34 +15,34 @@
 //! analytic, not a golden value: nothing here depends on how an engine
 //! discretises anything.
 //!
-//! # What `chamfer_v2` produces
+//! # Why the corner patches have to be built, not deduplicated
 //!
-//! 18 faces, all quads, zero triangles. The 8 corner triangles are simply
-//! absent, because `chamfer_builder` never calls
-//! `corner::compute_corners` — the fillet builder calls it at
-//! `fillet_builder.rs:183`, and `grep -c corner chamfer_builder.rs` is 0.
+//! `chamfer_v2` used to produce 18 quads and no triangles. The eight corner
+//! triangles were simply absent, and — measured over the 72 edge occurrences
+//! of that shell — the number of distinct `(start, end)` position pairs was
+//! *also* 72. There was no second copy of any curve, so `sew::weld_faces`,
+//! which keys on exactly that pair, had nothing to collapse. That is what
+//! pinned the fix to construction rather than deduplication: no amount of
+//! merging what was already there could close the shell.
 //!
-//! Each of the 18 quads is individually a closed loop. That is why the shell
-//! does not read as "one shell with holes" but as 18 separate pieces: no two
-//! faces share an edge, because the faces that would have connected them at
-//! the corners do not exist.
+//! # The fix, and the measurement that pins it
 //!
-//! # Why welding cannot fix it
+//! `blend::chamfer_corner` now does both halves of the job:
 //!
-//! `sew::weld_faces` collapses edges that span the same pair of welded
-//! vertices. Over the 72 edge occurrences of the `chamfer_v2` shell, the
-//! number of distinct `(start, end)` position pairs is *also* 72 — nothing to
-//! collapse. That is not a quirk of this measurement: the `fillet` control
-//! below is run through the identical counter and does report a non-zero
-//! collapsible count, so the counter can see duplicates when they exist.
+//! * the triangle through the three contact points at each such vertex —
+//!   found as the crossings of the contact lines two chamfered edges leave on
+//!   the face they share;
+//! * a setback on each bevel, read off that triangle's own corners, so the
+//!   bevel stops where the triangle starts rather than overlapping it.
 //!
-//! The consequence is a hard boundary on where the fix may live: the corner
-//! faces have to be *built*. No amount of deduplicating what is already there
-//! will close this shell.
+//! With the patches present there finally *is* a second copy of every shared
+//! curve, so welding has something to do — `welded_shell_leaves_no_edge_orphaned`
+//! below is the "after" measurement, and `weld_collapse_potential` is the
+//! counter that distinguishes the two states.
 //!
 //! # The fix is NOT `corner::compute_corners` as-is
 //!
-//! The obvious move is to call the fillet builder's corner routine. Measured:
+//! The obvious move was to call the fillet builder's corner routine. Measured:
 //! wiring it in unchanged gets the face COUNT right (18 -> 26, the 8 corner
 //! patches appear) and the shell still does not close, at
 //! `V/E/F = 100/96/26, free = 96, components = 26`. It is slightly worse than
@@ -64,8 +57,9 @@
 //! a chord half-length because "CircSection is shaped for fillets".
 //!
 //! `the_spherical_corner_path_is_wrong_for_chamfer` below is the standing
-//! record of that experiment, so nobody re-runs it. The corner patch chamfer
-//! needs is a plane through the three contact points.
+//! record of that experiment, so nobody re-runs it. The corner patch a chamfer
+//! needs is a plane through the three contact points, built by
+//! chamfer-specific code.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
 
@@ -138,6 +132,21 @@ fn face_count(topo: &Topology, solid: SolidId) -> usize {
         .len()
 }
 
+/// How many faces reference each edge of the outer shell.
+fn edge_usage(topo: &Topology, solid: SolidId) -> HashMap<usize, usize> {
+    let shell = topo.solid(solid).unwrap().outer_shell();
+    let mut usage: HashMap<usize, usize> = HashMap::new();
+    for &fid in topo.shell(shell).unwrap().faces() {
+        let face = topo.face(fid).unwrap();
+        for wid in std::iter::once(face.outer_wire()).chain(face.inner_wires().iter().copied()) {
+            for oe in topo.wire(wid).unwrap().edges() {
+                *usage.entry(oe.edge().index()).or_insert(0) += 1;
+            }
+        }
+    }
+    usage
+}
+
 /// A point quantised to [`WELD_TOL`], so two points within the tolerance
 /// compare equal.
 type PointKey = (i64, i64, i64);
@@ -147,7 +156,7 @@ type PointKey = (i64, i64, i64);
 ///
 /// `occurrences - distinct` is exactly the number of edges `sew::weld_faces`
 /// would be able to collapse: it keys on the welded endpoint pair, and nothing
-/// else. A result of 0 means welding is a genuine no-op on this shell.
+/// else. Zero means welding is a genuine no-op on this shell.
 fn weld_collapse_potential(topo: &Topology, solid: SolidId) -> (usize, usize) {
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     let q = |v: f64| (v / WELD_TOL).round() as i64;
@@ -230,23 +239,14 @@ fn control_chamfered_cube_has_the_full_corner_budget() {
     }
 }
 
-// ── The defect: `chamfer_v2` builds no corner patches ─────────────────────
+// ── The requirement: `chamfer_v2` meets the same budget ───────────────────
 
-/// The defect, stated as the analytic face budget it fails to meet.
+/// The analytic face budget, asserted against `chamfer_v2`.
 ///
-/// This is the assertion that makes "the corner patches are missing"
-/// checkable rather than a claim in a comment.
-///
-/// Currently red and `#[ignore]`d so the default suite stays green; the
-/// failure *is* the ticket. **The fix is to call `corner::compute_corners`
-/// from `chamfer_builder`, after which removing the `#[ignore]` turns this
-/// green with no edit to its assertions** — and
-/// `walking_engine_current_output_is_18_quads_with_no_triangles` gets deleted
-/// at the same time. The control case below is what proves the expectation
-/// itself is right; if it ever goes red, `EXPECTED_FACES` is wrong and this
-/// test is measuring against a bad budget rather than catching a real defect.
+/// This was red until `blend::chamfer_corner` landed. It asserts the budget
+/// rather than a golden face count so it can never pass by accident: the
+/// control case above is what proves the budget itself is right.
 #[test]
-#[ignore = "chamfer_v2 never calls corner::compute_corners, so the 8 corner patches are absent"]
 fn walking_engine_builds_the_corner_patches() {
     for &d in &DISTANCES {
         let mut topo = Topology::new();
@@ -268,85 +268,84 @@ fn walking_engine_builds_the_corner_patches() {
     }
 }
 
-/// Records what `chamfer_v2` produces instead, so the present state is pinned
-/// by a measurement rather than by a comment that can silently drift.
+/// The corners are flat triangles, not curved patches.
 ///
-/// Deliberately green: it documents the present output, not the desired one.
-/// The gap lives in `walking_engine_builds_the_corner_patches` (red, ignored).
-///
-/// **When the corner patches land, this test is deleted** — its two numbers
-/// move into the module docs and into `chamfer_shell_manifold.rs` as the
-/// "before" measurement, and the ignore comes off
-/// `walking_engine_builds_the_corner_patches` with no edit to its assertions.
-/// Keeping both would leave a test asserting a state the engine is no longer
-/// in.
-///
-/// Until then, if this test starts failing unexpectedly, the engine changed
-/// and every number quoted about it — here, in `chamfer_builder.rs`, and in
-/// `chamfer_shell_manifold.rs` — needs re-measuring.
+/// A chamfer corner is cut by a plane; `F = 26` reached with curved faces
+/// would mean a spherical patch had been substituted. See the module docs —
+/// wiring `corner::compute_corners` in unchanged did exactly that, and the
+/// shell still did not close.
 #[test]
-fn walking_engine_current_output_is_18_quads_with_no_triangles() {
+fn chamfer_result_is_all_planar() {
     for &d in &DISTANCES {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
         let edges = solid_edges(&topo, solid).unwrap();
         let result = chamfer_v2(&mut topo, solid, &edges, d, d).unwrap().solid;
+        let shell = topo.solid(result).unwrap().outer_shell();
 
+        let mut planes = 0usize;
+        let mut curved = 0usize;
+        for &fid in topo.shell(shell).unwrap().faces() {
+            match topo.face(fid).unwrap().surface() {
+                FaceSurface::Plane { .. } => planes += 1,
+                _ => curved += 1,
+            }
+        }
         assert_eq!(
-            face_count(&topo, result),
-            18,
-            "present-day output is 6 sides + 12 bevels and no corner patches; \
-             if this number moved, re-measure everything quoted about it \
-             (d={d})"
-        );
-        assert_eq!(
-            side_histogram(&topo, result),
-            vec![(4, 18)],
-            "all 18 present-day faces are quads — no triangles at all (d={d})"
+            (planes, curved),
+            (EXPECTED_FACES, 0),
+            "all {EXPECTED_FACES} faces are planes at d={d}; a NURBS face here would \
+             mean a spherical corner patch had been substituted for the flat \
+             triangle a chamfer requires"
         );
     }
 }
 
-// ── Why welding cannot be the fix ─────────────────────────────────────────
+// ── Welding: pointless before the patches, necessary after ────────────────
 
-/// The measurement that exonerates `sew::weld_faces` on this shell.
+/// The "after" measurement that the "before" one is read against.
 ///
-/// `sew::weld_faces` merges edges spanning the same welded endpoint pair. Over
-/// the `chamfer_v2` shell's 72 edge occurrences there are 72 *distinct*
-/// endpoint pairs — so there is no second copy of any curve and the welder
-/// has nothing to collapse. The shell cannot be closed by deduplication; the
-/// missing corner faces have to be constructed.
+/// Before the corner patches existed this shell had 72 edge occurrences over
+/// 72 distinct endpoint pairs — nothing for `weld_faces` to collapse, which is
+/// what proved the faces had to be built. With the patches present every
+/// curve has a second copy, so welding closes the shell: every edge is
+/// referenced exactly twice and nothing is orphaned.
 #[test]
-fn walking_engine_shell_has_nothing_for_welding_to_collapse() {
+fn welded_shell_leaves_no_edge_orphaned() {
     for &d in &DISTANCES {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
         let edges = solid_edges(&topo, solid).unwrap();
         let result = chamfer_v2(&mut topo, solid, &edges, d, d).unwrap().solid;
 
+        // 6 sides x 4 + 12 bevels x 4 + 8 triangles x 3.
+        let expected_occurrences: usize = 6 * 4 + 12 * 4 + 8 * 3;
         let (occurrences, distinct) = weld_collapse_potential(&topo, result);
+
         assert_eq!(
-            occurrences, 72,
-            "18 quad faces give 72 edge occurrences at d={d}"
+            occurrences, expected_occurrences,
+            "26 faces give {expected_occurrences} edge occurrences at d={d}"
         );
-        assert_eq!(
-            distinct, occurrences,
-            "every edge spans a distinct endpoint pair, so weld_faces is a \
-             no-op here (d={d}); the fix must build the missing corner faces"
+        assert!(
+            distinct < occurrences,
+            "with the corner patches built, curves are shared and weld_faces has \
+             something to collapse; got occurrences={occurrences} \
+             distinct={distinct} at d={d}"
+        );
+
+        let usage = edge_usage(&topo, result);
+        assert!(
+            usage.values().all(|&n| n == 2),
+            "after welding every edge is referenced exactly twice (d={d}); \
+             (edges used N times -> count) = {:?}",
+            usage_histogram(&usage)
         );
     }
 }
 
 /// The counter's own control: confirm it reports duplicates when duplicates
-/// exist, so the zero above is a fact about the shell rather than a broken
+/// exist, so the numbers above are facts about the shells rather than a broken
 /// measurement.
-///
-/// `weld_collapse_potential` returns `(occurrences, distinct endpoint pairs)`.
-/// A shell whose curves are each referenced once has `occurrences ==
-/// distinct`; a shell that shares curves has `occurrences > distinct`. The
-/// chamfer control engine produces a closed 26-face shell, so some of its
-/// curves are necessarily referenced twice — the counter must see that, and
-/// must *not* see it on the walked shell.
 ///
 /// Reverse-verified: stubbing the distinct count to always equal the
 /// occurrence count (simulating a broken counter) turns the first half of
@@ -364,30 +363,27 @@ fn the_weld_counter_detects_sharing_when_it_exists() {
          distinct={distinct}"
     );
 
-    // And the walked shell, for contrast, on the same measurement.
+    // And the walking engine, now that it closes too.
     let mut topo2 = Topology::new();
     let walked = walked_cube(&mut topo2);
     let (occ2, distinct2) = weld_collapse_potential(&topo2, walked);
-    assert_eq!(
-        occ2, distinct2,
-        "the walked shell references no curve twice — this is the defect, and \
-         it is what makes welding useless here"
+    assert!(
+        occ2 > distinct2,
+        "the walked shell now shares its curves as well; got occurrences={occ2} \
+         distinct={distinct2}"
     );
 }
 
-// ── Why the shell reads as 18 pieces rather than one holed shell ───────────
+// ── Why the shell used to read as 18 pieces rather than one holed shell ────
 
-/// Every one of `chamfer_v2`'s faces is a closed loop, yet no two faces share
-/// an edge.
+/// Every face is individually closed, and every edge now has two faces on it.
 ///
-/// These are two independent facts and both are needed to explain the symptom:
-/// the faces are individually well-formed (so nothing is obviously broken
-/// about any one face), and they are mutually unconnected (so the shell has
-/// no adjacency at all). Together they are why the result presents as 18
-/// disconnected components rather than as a single shell with holes in it —
-/// a distinction that matters for reading the failure.
+/// The first fact is why the old failure read as "18 disconnected components"
+/// rather than "one shell with holes": nothing was wrong with any single face,
+/// they were mutually unconnected. The second is what changed — pairs of faces
+/// now meet along shared edges instead of each owning its own copy.
 #[test]
-fn every_face_is_individually_closed_but_shares_no_edge_with_a_neighbour() {
+fn every_face_is_individually_closed_and_shares_its_edges() {
     for &d in &DISTANCES {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
@@ -405,7 +401,6 @@ fn every_face_is_individually_closed_but_shares_no_edge_with_a_neighbour() {
                 .edges()
                 .to_vec();
 
-            // Fact one: this face's own wire closes end-to-start.
             let closes = {
                 let first = oes[0];
                 let ef = topo.edge(first.edge()).unwrap();
@@ -417,7 +412,6 @@ fn every_face_is_individually_closed_but_shares_no_edge_with_a_neighbour() {
                 unclosed.push(i);
             }
 
-            // Fact two: no edge of it is referenced by any other face.
             for oe in &oes {
                 *usage.entry(oe.edge().index()).or_insert(0) += 1;
             }
@@ -425,13 +419,13 @@ fn every_face_is_individually_closed_but_shares_no_edge_with_a_neighbour() {
 
         assert!(
             unclosed.is_empty(),
-            "every present-day face should be individually closed (measured \
-             for d={d}); unclosed face indices {unclosed:?}"
+            "every face should be individually closed (measured for d={d}); \
+             unclosed face indices {unclosed:?}"
         );
         assert!(
-            usage.values().all(|&n| n == 1),
-            "no two faces share an edge, which is why the shell falls apart \
-             into 18 pieces (d={d}); (edges used N times -> count) = {:?}",
+            usage.values().all(|&n| n == 2),
+            "every edge is shared by exactly two faces (d={d}); \
+             (edges used N times -> count) = {:?}",
             usage_histogram(&usage)
         );
     }
@@ -494,38 +488,6 @@ fn side_count_reads_the_outer_wire() {
 
 // ── Why the fillet corner path is the wrong one for chamfer ───────────────
 
-/// Surface census of the current chamfer result: all planes, no NURBS.
-///
-/// This is the baseline the experiment below is read against. `chamfer_v2`
-/// produces flat geometry today; a fix that introduces NURBS faces into the
-/// corner is building something a chamfer should not have.
-#[test]
-fn chamfer_result_is_all_planar_today() {
-    for &d in &DISTANCES {
-        let mut topo = Topology::new();
-        let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
-        let edges = solid_edges(&topo, solid).unwrap();
-        let result = chamfer_v2(&mut topo, solid, &edges, d, d).unwrap().solid;
-        let shell = topo.solid(result).unwrap().outer_shell();
-
-        let mut planes = 0usize;
-        let mut curved = 0usize;
-        for &fid in topo.shell(shell).unwrap().faces() {
-            match topo.face(fid).unwrap().surface() {
-                FaceSurface::Plane { .. } => planes += 1,
-                _ => curved += 1,
-            }
-        }
-        assert_eq!(
-            (planes, curved),
-            (18, 0),
-            "the present result is 18 planes and nothing else at d={d}; a \
-             NURBS face here would mean a spherical corner patch had been \
-             substituted for the flat triangle a chamfer requires"
-        );
-    }
-}
-
 /// The standing record of the experiment that ruled out the obvious fix.
 ///
 /// `corner::compute_corners` was wired into `chamfer_builder` unchanged, the
@@ -542,18 +504,11 @@ fn chamfer_result_is_all_planar_today() {
 /// a chord half-length while noting that the struct "is shaped for fillets".
 ///
 /// Recording it here means the next person does not spend the experiment
-/// again. Re-run it by reverting this test's `WIRED_UP` marker to true and
-/// adding the call; the numbers above are what to expect.
-///
-/// The consequence for the fix: the chamfer corner patch has to be a **plane
-/// through the three contact points**, constructed by chamfer-specific code.
-/// Reusing the fillet corner module cannot produce it.
+/// again. The guard below is what is left of it: the shipped corner patches
+/// are planes, and the shell closes — so neither symptom can come back without
+/// this test noticing.
 #[test]
 fn the_spherical_corner_path_is_wrong_for_chamfer() {
-    // These assertions describe the un-wired baseline. If
-    // `corner::compute_corners` ever does get wired into `chamfer_builder`,
-    // this whole file's expectations move, and the numbers in this test's docs
-    // are the ones to re-measure.
     for &d in &DISTANCES {
         let mut topo = Topology::new();
         let solid = make_box(&mut topo, SIDE, SIDE, SIDE).unwrap();
@@ -576,21 +531,19 @@ fn the_spherical_corner_path_is_wrong_for_chamfer() {
             }
         }
 
-        // Wiring the spherical path in produced 8 NURBS faces. Un-wired, there
-        // are none.
+        // Wiring the spherical path in produced 8 NURBS faces; the shipped
+        // patches are planes.
         assert_eq!(
             nurbs, 0,
             "the spherical corner path must not be wired in: it yields 8 NURBS \
              faces where a chamfer requires flat triangles (d={d})"
         );
-        // And every edge stays free, which is the shell symptom the spherical
-        // path was supposed to fix and did not.
+        // And the shell closes, which the spherical path did not achieve.
         let free = usage.values().filter(|&&n| n == 1).count();
         assert_eq!(
-            free,
-            usage.len(),
-            "with the spherical path un-wired every edge is free, as measured \
-             before the experiment (d={d}); wiring it in left all 96 free too"
+            free, 0,
+            "the flat corner patches close the shell; wiring in the spherical \
+             path instead left all 96 edges free (d={d})"
         );
     }
 }

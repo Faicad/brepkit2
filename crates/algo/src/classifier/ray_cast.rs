@@ -1219,8 +1219,8 @@ pub fn planar_face_polygons(
 /// Test whether `point` lies inside the planar face's region (inside the outer
 /// loop and outside every hole), projecting along the face normal.
 ///
-/// Curved boundaries are honoured exactly rather than through their chords:
-/// see [`WireRegion::contains`].
+/// Curved boundaries are honoured exactly rather than through their chords;
+/// see `WireRegion::contains` for the per-segment test.
 #[must_use]
 pub fn point_in_planar_region(
     point: Point3,
