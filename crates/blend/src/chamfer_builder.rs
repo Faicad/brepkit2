@@ -14,8 +14,10 @@ use brepkit_topology::solid::{Solid, SolidId};
 
 use crate::analytic;
 use crate::builder_utils::sample_nurbs_endpoints;
+use crate::chamfer_corner::{self, ChamferStripe};
+use crate::sew;
 use crate::spine::Spine;
-use crate::stripe::StripeResult;
+use crate::stripe::Stripe;
 use crate::trimmer::{self, TrimKeep};
 use crate::{BlendError, BlendResult};
 
@@ -165,7 +167,7 @@ impl<'a> ChamferBuilder<'a> {
 
         let mut succeeded: Vec<EdgeId> = Vec::new();
         let mut failed: Vec<(EdgeId, BlendError)> = Vec::new();
-        let mut stripe_results: Vec<StripeResult> = Vec::new();
+        let mut stripe_results: Vec<ChamferStripe> = Vec::new();
 
         for (edge_id, d1, d2) in &all_edges {
             let result = compute_chamfer_stripe(topo, &adjacency, *edge_id, *d1, *d2);
@@ -190,6 +192,27 @@ impl<'a> ChamferBuilder<'a> {
                 failed,
                 is_partial: false,
             });
+        }
+
+        // Where three or more chamfered edges meet, a bevel cannot run to the
+        // vertex: the bevels overlap each other there and the corner is left
+        // open. Each such vertex needs a flat patch through the three contact
+        // points, and each bevel has to stop where that patch begins. Both come
+        // out of the same computation — see `chamfer_corner`.
+        //
+        // All of it has to happen before the trimming loop below rewrites the
+        // topology. The analytic path derives which way a contact line runs by
+        // finding the spine edge in the face's own wires; the trimmer splits
+        // that edge and propagates the split into every wire that uses it, so
+        // afterwards the lookup misses and the contact direction falls back to
+        // the bisector — measured: 10 of a cube's 12 bevels then come out
+        // mirrored outside the solid.
+        let patches = chamfer_corner::corner_patches(topo, &stripe_results);
+        let setbacks = chamfer_corner::setbacks(topo, &stripe_results, &patches);
+        let mut bevels: Vec<Stripe> = Vec::with_capacity(stripe_results.len());
+        for (i, entry) in stripe_results.iter().enumerate() {
+            let (start, end) = setbacks.get(i).copied().unwrap_or((0.0, 0.0));
+            bevels.push(windowed_stripe(topo, entry, start, end)?);
         }
 
         let mut face_replacements: std::collections::HashMap<FaceId, FaceId> =
@@ -275,7 +298,7 @@ impl<'a> ChamferBuilder<'a> {
 
         let mut blend_face_ids: Vec<FaceId> = Vec::new();
 
-        for (si, sr) in stripe_results.iter().enumerate() {
+        for si in 0..stripe_results.len() {
             // Reuse the trimmed neighbours' contact edges (mirrors the fillet
             // builder): a freshly minted duplicate leaves both copies use-1
             // and opens the shell along the chamfer flanks.
@@ -284,7 +307,7 @@ impl<'a> ChamferBuilder<'a> {
                 .copied()
                 .unwrap_or((None, None));
             let blend_face_id =
-                crate::builder_utils::create_blend_face_with_contacts(topo, &sr.stripe, c1, c2)?
+                crate::builder_utils::create_blend_face_with_contacts(topo, &bevels[si], c1, c2)?
                     .face;
             blend_face_ids.push(blend_face_id);
         }
@@ -303,41 +326,15 @@ impl<'a> ChamferBuilder<'a> {
         }
 
         result_faces.extend(&blend_face_ids);
+        result_faces.extend(chamfer_corner::build_patches(topo, &patches)?);
 
-        // NOTE: `sew::weld_faces` is deliberately *not* called here, unlike
-        // `fillet_builder`. Measured on a 10^3 box at d = 0.5 / 1 / 2, adding it
-        // changes nothing at all — V/E/F stays 76/72/18, free stays 72,
-        // components stay 18 — because there is no second copy of any curve to
-        // weld in the first place: over the 72 edge occurrences the count of
-        // distinct (start, end) position pairs quantised to 1e-6 is also 72.
-        //
-        // The reason is upstream of welding. This builder never calls
-        // `corner::compute_corners` (the fillet builder does), so the eight
-        // corners where three chamfered edges meet are bounded by nothing: a
-        // chamfered cube needs 6 side faces + 12 bevels + 8 corner triangles =
-        // 26 faces, and the result here is 18 quads with no triangles. Each
-        // quad is individually closed, which is why the shell reads as 18
-        // disconnected pieces rather than one shell with holes.
-        //
-        // Calling `corner::compute_corners` here is NOT the fix, though it is
-        // the obvious next thing to try. Measured: it gets the face count right
-        // (18 -> 26, the 8 corner faces do appear) and the shell still does not
-        // close — `V/E/F = 100/96/26, free = 96, components = 26`, slightly
-        // worse than before. `corner.rs` routes 3+ stripe vertices to
-        // `spherical_triangle`, documented as "rolling-ball sphere" and
-        // "great-circle arcs" on a "Fillet radius"; a chamfer corner is a flat
-        // triangle, and a spherical patch's boundary arcs do not land on the
-        // straight contact lines of the faces it must meet. It also leans on
-        // `CircSection`, which `analytic.rs` fills with a chord half-length
-        // while noting the struct "is shaped for fillets".
-        //
-        // What the fix needs instead is a chamfer-specific corner patch: a
-        // plane through the three contact points, one per corner, with edges
-        // shared against the two adjacent bevels and the side face. See
-        // `crates/operations/tests/chamfer_corner_patches.rs`, whose
-        // `the_spherical_corner_path_is_wrong_for_chamfer` records the
-        // experiment above, and `chamfer_shell_manifold.rs`, which pins the
-        // defect against a control engine that reaches F = 26 / free = 0.
+        // Every producer above mints the edges it needs: the trimmer on the
+        // trimmed neighbour, the bevel for its own flanks, the corner patch for
+        // its own boundary. The curves they share are the same geometry but
+        // separate entities, so the shell only becomes a manifold once they are
+        // welded. This is the same pass `fillet_builder` runs.
+        let result_faces = sew::weld_faces(topo, &result_faces)?;
+
         let new_shell = Shell::new(result_faces)?;
         let new_shell_id = topo.add_shell(new_shell);
         let new_solid = Solid::new(new_shell_id, Vec::new());
@@ -353,6 +350,55 @@ impl<'a> ChamferBuilder<'a> {
     }
 }
 
+/// A chamfer's end cross-section is a straight chord, not an arc.
+///
+/// `create_blend_face_with_contacts` gives a stripe's two cross edges the arc
+/// of its end section when one is present. The chamfer path fills
+/// `CircSection` with a chord half-length — `analytic.rs` notes the struct "is
+/// shaped for fillets" — so an arc there bulges a boundary that is really a
+/// straight line. Dropping the sections leaves those edges as lines: correct,
+/// and the same curve the corner patch's own edges carry, so welding keeps the
+/// straight one rather than a half-chord bulge.
+fn straight_ended(mut stripe: Stripe) -> Stripe {
+    stripe.sections.clear();
+    stripe
+}
+
+/// The stripe over `[start, length - end]` of its spine.
+///
+/// Rebuilt through the analytic path the full stripe came from, so the contact
+/// lines, surface and pcurves stay consistent with each other. The full stripe
+/// is returned unchanged when there is nothing to hold back, or when the
+/// analytic path cannot serve the shortened spine — a bevel that runs slightly
+/// too far degrades more gracefully than no bevel at all.
+fn windowed_stripe(
+    topo: &Topology,
+    entry: &ChamferStripe,
+    start: f64,
+    end: f64,
+) -> Result<Stripe, BlendError> {
+    let full = &entry.stripe;
+    if start <= 0.0 && end <= 0.0 {
+        return Ok(straight_ended(full.clone()));
+    }
+
+    let spine = full.spine.window(start, full.spine.length() - end);
+    let shortened = analytic::try_analytic_chamfer(
+        &entry.surf1,
+        &entry.surf2,
+        &spine,
+        topo,
+        entry.d1,
+        entry.d2,
+        full.face1,
+        full.face2,
+    )?;
+
+    Ok(straight_ended(
+        shortened.map_or_else(|| full.clone(), |sr| sr.stripe),
+    ))
+}
+
 /// Compute a chamfer stripe for a single edge using the adjacency index.
 ///
 /// # Errors
@@ -365,7 +411,7 @@ fn compute_chamfer_stripe(
     edge_id: EdgeId,
     d1: f64,
     d2: f64,
-) -> Result<StripeResult, BlendError> {
+) -> Result<ChamferStripe, BlendError> {
     let adj_faces = adjacency.faces_for_edge(edge_id);
     if adj_faces.len() != 2 {
         log::warn!(
@@ -388,7 +434,14 @@ fn compute_chamfer_stripe(
     if let Some(result) =
         analytic::try_analytic_chamfer(&surf1, &surf2, &spine, topo, d1, d2, face1, face2)?
     {
-        return Ok(result);
+        return Ok(ChamferStripe {
+            edge: edge_id,
+            stripe: result.stripe,
+            surf1,
+            surf2,
+            d1,
+            d2,
+        });
     }
 
     log::debug!(

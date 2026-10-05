@@ -1,11 +1,11 @@
 //! A chamfer must hand back a *closed 2-manifold*, not just a plausible solid.
 //!
-//! `chamfer_v2` assembles its result the same way `fillet_v2` did before the
-//! C-01 welding fix: each producer mints the edges it needs, so the curves two
-//! neighbours share exist as two separate `EdgeId`s, each referenced by a
-//! single face. `validate_shell_closed` then rejects the shell, and every
-//! consumer that walks adjacency (offsetting, shelling, the wasm `is_valid`
-//! gate) has nothing to traverse.
+//! `chamfer_v2` used to assemble its result the way `fillet_v2` did before the
+//! C-01 welding fix: each producer minted the edges it needed, so the curves
+//! two neighbours share existed as separate `EdgeId`s each referenced by a
+//! single face, and `validate_shell_closed` rejected the shell. Every consumer
+//! that walks adjacency — offsetting, shelling, the wasm `is_valid` gate — had
+//! nothing to traverse.
 //!
 //! The invariant asserted here is purely topological and needs no closed form:
 //!
@@ -19,54 +19,54 @@
 //! control fails, the measurement or the expectation is wrong, not the engine
 //! under test.
 //!
-//! **The main case is still red and is marked `#[ignore]`.** Measured at
-//! `d = 0.5 / 1 / 2`, identically at all three: `F = 18`, `E = 72`, `free = 72`,
-//! `over-shared = 0`, 18 connected components. Two independent defects stand
-//! between `chamfer_v2` and a closed shell:
+//! # What was missing, and why welding alone could not supply it
 //!
-//! 1. *Trim keep-side* — fixed in the same round (see
-//!    `chamfer_trim_extent.rs`): the trimmer kept the sliver next to the bevel
-//!    and dropped the bulk of one of the two faces sharing the edge. Each of
-//!    the six side faces is now a full `(S-2d)` square, so this half landed.
-//! 2. *Missing corner patches* — still open, and it is the whole of the
-//!    remaining gap. `chamfer_builder` never calls `corner::compute_corners`
-//!    (the fillet builder does, at `fillet_builder.rs:183`); grep the module
-//!    for "corner" and there are zero hits. So the eight corners where three
-//!    chamfered edges meet are bounded by nothing at all.
+//! Two independent defects stood between `chamfer_v2` and a closed shell, and
+//! they had to land together:
 //!
-//! The face count settles it. A chamfered cube has 6 side faces + 12 bevels +
-//! **8 corner triangles** = 26 faces, and the control engine
-//!    (`operations::chamfer::chamfer`, a different solver) produces exactly
-//!    that: `F = 26`, side-count histogram `[(3, 8), (4, 18)]`, `free = 0`.
-//! `chamfer_v2` produces `F = 18` with histogram `[(4, 18)]` — the eight
-//! triangles are simply absent. Each of the 18 faces is individually a closed
-//! quad, which is why the shell reads as 18 disconnected components rather
-//! than as one shell with holes.
+//! 1. *Trim keep-side* — fixed earlier (see `chamfer_trim_extent.rs`): the
+//!    trimmer kept the sliver next to the bevel and dropped the bulk of one of
+//!    the two faces sharing the edge.
+//! 2. *Missing corner patches* — fixed here. `chamfer_builder` built each bevel
+//!    over the whole of its edge, so at a vertex where three chamfered edges
+//!    meet the bevels ran into one another and the corner was bounded by
+//!    nothing: 18 quads, 18 disconnected components, and no corner patches at
+//!    all.
 //!
-//! So this is **not** the duplicate-entity problem the fillet side had
-//! (`blend/src/sew.rs`), and the reason is stronger than "the endpoints
-//! differ": there is no second copy of any curve to weld *in the first place*.
-//! Measured over the 72 edge occurrences, the number of distinct
-//! `(start, end)` position pairs quantised to 1e-6 is also 72 — collapsible
-//! count 0. `weld_faces` keys on exactly that pair, so it has nothing to
-//! collapse and is a genuine no-op here. Hooking it in would not help; the
-//! missing faces have to be built.
+//! The fix is in `blend::chamfer_corner`. Each such vertex gets a flat
+//! triangle through the three contact points — the plane that cuts the corner
+//! off — and each bevel is set back along its spine so that it stops where
+//! that triangle starts instead of overlapping it. The setback is read off the
+//! triangle's own corners, so the two agree by construction rather than by two
+//! independent derivations happening to match.
 //!
-//! Every claim on this page is pinned by an assertion in
-//! `chamfer_corner_patches.rs` — the face budget, the side-count histogram,
-//! the weld-collapse count, and the fact that each face is individually closed
-//! while sharing no edge with any neighbour. That file also carries the
-//! control case that keeps the expectations honest, and documents what to do
-//! with the numbers when the corner patches land.
+//! Welding is still needed, but for the opposite reason from the fillet case:
+//! now that the corner patches exist there *is* a second copy of every shared
+//! curve to collapse, and `sew::weld_faces` merges them once the shell is
+//! assembled. Measured before the patches existed, that collapse count was
+//! zero — which is what made welding a no-op and proved the faces had to be
+//! built rather than deduplicated.
 //!
-//! One thing already ruled out by measurement, so it needn't be retried:
-//! calling `corner::compute_corners` here, the way `fillet_builder` does. It
-//! produces the 8 corner faces and the right face count, but they come out as
-//! NURBS spherical patches rather than flat triangles, and the shell does not
-//! close — `free = 96` of 96 edges, 26 components. The corner patch a chamfer
-//! needs is a plane through the three contact points, built by
-//! chamfer-specific code. See
-//! `the_spherical_corner_path_is_wrong_for_chamfer` in the sibling file.
+//! # What was ruled out, so nobody re-runs it
+//!
+//! Calling `corner::compute_corners`, the way `fillet_builder` does. It does
+//! produce 8 corner faces and the right face count, but they come out as NURBS
+//! spherical patches rather than flat triangles and the shell still does not
+//! close — `V/E/F = 100/96/26`, `free = 96`, 26 components. `corner.rs` routes
+//! 3+ stripe vertices to `spherical_triangle`, documented as "rolling-ball
+//! sphere" and "great-circle arcs"; a chamfer corner is a flat triangle and a
+//! spherical patch's boundary arcs do not land on the straight contact lines it
+//! has to meet. See `the_spherical_corner_path_is_wrong_for_chamfer` in
+//! `chamfer_corner_patches.rs` for the standing record.
+//!
+//! # One caveat about reading Euler here
+//!
+//! `validate_shell_closed` accepting a shell means *every edge is referenced
+//! exactly twice*, not that `V - E + F == 2`. The control engine passes this
+//! test while carrying surplus vertices — measured `V = 32` against the 24 a
+//! chamfered cube needs, giving `V - E + F = 10`. It is watertight but not
+//! Euler-clean, so a `V - E + F == 2` assertion would fail on the very engine
+//! this file uses as its reference. Neither engine is expected to satisfy it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
 
@@ -239,17 +239,17 @@ fn control_rebuild_box_chamfer_is_a_closed_manifold() {
     );
 }
 
-/// The defect: `chamfer_v2` leaves the chamfered cube with free edges, so the
-/// shell is not a closed 2-manifold and is rejected by `validate_shell_closed`.
+/// `chamfer_v2`'s result must be a closed, connected 2-manifold too.
 ///
-/// Measured at `d = 0.5 / 1 / 2` (identical at all three): `V / E / F = 76 / 72
-/// / 18` with `free = 72`, `over-shared = 0` and 18 components — *every* edge
-/// is orphaned on both sides, and the 18 faces form 18 separate pieces. The
-/// control engine on the same inputs gives `F = 26` with `free = 0`; the eight
-/// corner triangles it builds and this engine does not are the whole gap (see
-/// the module docs).
+/// This was red until `chamfer_corner` landed. The old measurement, kept here
+/// as the "before": `V/E/F = 76/72/18`, `free = 72`, `over-shared = 0`, 18
+/// components — every edge orphaned on both sides and 18 separate pieces,
+/// because the eight corner triangles did not exist and the twelve bevels each
+/// ran the full length of their edge.
+///
+/// The control engine on the same inputs gives `F = 26` with `free = 0`, and
+/// that is now what the walking engine produces as well.
 #[test]
-#[ignore = "chamfer_v2 builds no corner patches, so the 8 corners are unbounded and every edge is free"]
 fn walking_engine_box_chamfer_is_a_closed_manifold() {
     let mut offenders = Vec::new();
     for &d in &DISTANCES {
