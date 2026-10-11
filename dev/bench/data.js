@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791719164076,
+  "lastUpdate": 1791722150249,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -1187,6 +1187,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 26802722,
             "range": "± 81361",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "b6b8b2a556d41e0487f3b1352ca2ed7d318d272c",
+          "message": "chore(release): v2.130.0",
+          "timestamp": "2026-10-11T20:11:05+08:00",
+          "tree_id": "87259a47a61bad9f28c84c5db96219e8c6a3a832",
+          "url": "https://github.com/Faicad/brepkit2/commit/b6b8b2a556d41e0487f3b1352ca2ed7d318d272c"
+        },
+        "date": 1791722149625,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 764474,
+            "range": "± 1163",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 827567,
+            "range": "± 2226",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 10113,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 555619,
+            "range": "± 18918",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 20518030,
+            "range": "± 210545",
             "unit": "ns/iter"
           }
         ]
