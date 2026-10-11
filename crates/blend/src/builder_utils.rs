@@ -42,7 +42,9 @@ pub fn create_blend_face_with_contacts(
     topo: &mut Topology,
     stripe: &Stripe,
     contact1_edge: Option<brepkit_topology::edge::EdgeId>,
+    contact1_face: Option<FaceId>,
     contact2_edge: Option<brepkit_topology::edge::EdgeId>,
+    contact2_face: Option<FaceId>,
 ) -> Result<BlendFaceInfo, BlendError> {
     const WELD: f64 = 1e-5;
     let (t0_1, t1_1) = stripe.contact1.domain();
@@ -56,27 +58,54 @@ pub fn create_blend_face_with_contacts(
     // Adopt a trimmer contact edge when its endpoints match `(want_s, want_e)`
     // in either orientation: returns (edge, forward, start_vid, end_vid) in
     // the WIRE traversal direction.
+    //
+    // The recorded contact edge can go stale: a later stripe's re-trim of the
+    // same face splits the earlier full-span contact edge, and only a shorter
+    // sub-segment survives in the trimmed face's wire. When direct adoption
+    // misses, scan the side's face wire for the edge whose endpoints match the
+    // stripe's own (setback-limited) contact endpoints, and adopt that.
     let adopt = |topo: &Topology,
                  eid: Option<brepkit_topology::edge::EdgeId>,
+                 face: Option<FaceId>,
                  want_s: Point3,
                  want_e: Point3|
      -> Option<(brepkit_topology::edge::EdgeId, bool, VertexId, VertexId)> {
-        let eid = eid?;
-        let e = topo.edge(eid).ok()?;
-        let (sv, ev) = (e.start(), e.end());
-        let sp = topo.vertex(sv).ok()?.point();
-        let ep = topo.vertex(ev).ok()?.point();
-        if (sp - want_s).length() <= WELD && (ep - want_e).length() <= WELD {
-            Some((eid, true, sv, ev))
-        } else if (sp - want_e).length() <= WELD && (ep - want_s).length() <= WELD {
-            Some((eid, false, ev, sv))
-        } else {
-            None
+        let matches_want = |sp: Point3, ep: Point3| {
+            (sp - want_s).length() <= WELD && (ep - want_e).length() <= WELD
+        };
+        if let Some(eid) = eid {
+            let e = topo.edge(eid).ok()?;
+            let (sv, ev) = (e.start(), e.end());
+            let sp = topo.vertex(sv).ok()?.point();
+            let ep = topo.vertex(ev).ok()?.point();
+            if matches_want(sp, ep) {
+                return Some((eid, true, sv, ev));
+            }
+            if (sp - want_e).length() <= WELD && (ep - want_s).length() <= WELD {
+                return Some((eid, false, ev, sv));
+            }
         }
+        // Wire re-scan: find the surviving contact segment in the trimmed
+        // face's current boundary.
+        let face = face?;
+        let wire = topo.face(face).ok()?.outer_wire();
+        for oe in topo.wire(wire).ok()?.edges() {
+            let e = topo.edge(oe.edge()).ok()?;
+            let (sv, ev) = (e.start(), e.end());
+            let sp = topo.vertex(sv).ok()?.point();
+            let ep = topo.vertex(ev).ok()?.point();
+            if matches_want(sp, ep) {
+                return Some((oe.edge(), true, sv, ev));
+            }
+            if (sp - want_e).length() <= WELD && (ep - want_s).length() <= WELD {
+                return Some((oe.edge(), false, ev, sv));
+            }
+        }
+        None
     };
-    let adopt1 = adopt(topo, contact1_edge, p1_start, p1_end);
+    let adopt1 = adopt(topo, contact1_edge, contact1_face, p1_start, p1_end);
     // Contact 2 traverses end -> start in the quad below.
-    let adopt2 = adopt(topo, contact2_edge, p2_end, p2_start);
+    let adopt2 = adopt(topo, contact2_edge, contact2_face, p2_end, p2_start);
 
     // Create/reuse vertices (snapshot then allocate).
     let (v1s, v1e) = adopt1.map_or_else(

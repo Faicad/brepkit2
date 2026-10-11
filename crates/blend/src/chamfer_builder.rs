@@ -306,9 +306,15 @@ impl<'a> ChamferBuilder<'a> {
                 .get(si)
                 .copied()
                 .unwrap_or((None, None));
-            let blend_face_id =
-                crate::builder_utils::create_blend_face_with_contacts(topo, &bevels[si], c1, c2)?
-                    .face;
+            let blend_face_id = crate::builder_utils::create_blend_face_with_contacts(
+                topo,
+                &bevels[si],
+                c1,
+                None,
+                c2,
+                None,
+            )?
+            .face;
             blend_face_ids.push(blend_face_id);
         }
 

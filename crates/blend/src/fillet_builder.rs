@@ -193,13 +193,21 @@ impl<'a> FilletBuilder<'a> {
             corner_face_ids.push(cr.face_id);
         }
 
-        let mut stripe_contact_edges: Vec<(
-            Option<brepkit_topology::edge::EdgeId>,
-            Option<brepkit_topology::edge::EdgeId>,
-        )> = Vec::new();
+        // Per stripe, per side: the trimmer's contact edge plus the face that
+        // was trimmed for that side. The recorded edge can go stale when a
+        // LATER stripe re-trims the same face and splits the earlier contact
+        // edge into a shorter sub-segment (the setback-shortened span the
+        // blend face actually needs); the face id lets the blend-face builder
+        // re-resolve the surviving segment from the face's current wire.
+        let mut stripe_contact_edges: Vec<
+            [(
+                Option<brepkit_topology::edge::EdgeId>,
+                brepkit_topology::face::FaceId,
+            ); 2],
+        > = Vec::new();
         for sr in &regular_results {
             let stripe = &sr.stripe;
-            stripe_contact_edges.push((None, None));
+            stripe_contact_edges.push([(None, stripe.face1), (None, stripe.face2)]);
 
             let contact1_pts = sample_nurbs_endpoints(&stripe.contact1);
             let contact2_pts = sample_nurbs_endpoints(&stripe.contact2);
@@ -223,7 +231,7 @@ impl<'a> FilletBuilder<'a> {
             match trim1 {
                 Ok(tr) if tr.trimmed_face != current_face1 => {
                     if let Some(slot) = stripe_contact_edges.last_mut() {
-                        slot.0 = tr.contact_edge;
+                        slot[0].0 = tr.contact_edge;
                     }
                     face_replacements.insert(stripe.face1, tr.trimmed_face);
                 }
@@ -244,7 +252,7 @@ impl<'a> FilletBuilder<'a> {
             match trim2 {
                 Ok(tr) if tr.trimmed_face != current_face2 => {
                     if let Some(slot) = stripe_contact_edges.last_mut() {
-                        slot.1 = tr.contact_edge;
+                        slot[1].0 = tr.contact_edge;
                     }
                     face_replacements.insert(stripe.face2, tr.trimmed_face);
                 }
@@ -265,12 +273,26 @@ impl<'a> FilletBuilder<'a> {
 
             // Reuse the trimmed neighbours' contact edges so the blend flank
             // shares one edge entity per contact instead of minting a
-            // duplicate that leaves both faces' copies use-1.
-            let (c1, c2) = stripe_contact_edges
+            // duplicate that leaves both faces' copies use-1. The recorded
+            // edge may have been split by a later stripe's re-trim of the
+            // same face, so the side's (current) face is passed along for a
+            // wire re-scan when direct adoption misses.
+            let [side1, side2] = stripe_contact_edges
                 .get(si)
                 .copied()
-                .unwrap_or((None, None));
-            let info = crate::builder_utils::create_blend_face_with_contacts(topo, stripe, c1, c2)?;
+                .unwrap_or([(None, stripe.face1), (None, stripe.face2)]);
+            let (c1, c2) = (side1.0, side2.0);
+            let resolve = |face: brepkit_topology::face::FaceId| {
+                face_replacements.get(&face).copied().unwrap_or(face)
+            };
+            let info = crate::builder_utils::create_blend_face_with_contacts(
+                topo,
+                stripe,
+                c1,
+                Some(resolve(side1.1)),
+                c2,
+                Some(resolve(side2.1)),
+            )?;
             blend_face_ids.push(info.face);
             blend_cross_edges.push(info.cross_end);
             blend_cross_edges.push(info.cross_start);
