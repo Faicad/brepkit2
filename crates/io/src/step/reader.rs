@@ -439,6 +439,17 @@ impl<'a> StepBuilder<'a> {
                 Ok(EdgeCurve::Ellipse(ellipse))
             }
             "B_SPLINE_CURVE_WITH_KNOTS" => self.build_bspline_curve(curve_ref, &attrs, false),
+            // SURFACE_CURVE family (occt-written STEP wraps edge geometry in these):
+            // attrs = (name, basis_curve_3d, pcurve_list, master) — only the 3D
+            // basis curve matters for solid reconstruction; pcurves are surface
+            // parameterizations we intentionally ignore.
+            "SURFACE_CURVE" | "SEAM_CURVE" | "INTERSECTION_CURVE" => {
+                let refs = parse_refs(&attrs);
+                let basis_ref = refs.first().copied().ok_or_else(|| IoError::ParseError {
+                    reason: format!("{entity_type} #{curve_ref} missing basis curve reference"),
+                })?;
+                self.build_curve_geometry(basis_ref)
+            }
             _ if entity_type.is_empty() || attrs.contains("B_SPLINE_CURVE_WITH_KNOTS") => {
                 let is_rational = attrs.contains("RATIONAL");
                 self.build_bspline_curve(curve_ref, &attrs, is_rational)
