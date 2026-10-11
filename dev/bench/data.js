@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791168753326,
+  "lastUpdate": 1791719164076,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -1133,6 +1133,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24902025,
             "range": "± 44749",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "ed5f2ffb5905e9d4cae1206b4a085b3feba4ee94",
+          "message": "fix(io): read SURFACE_CURVE family via 3D basis curve in STEP reader\n\nocct-written STEP files wrap edge geometry in SURFACE_CURVE (and its\nsubtypes SEAM_CURVE / INTERSECTION_CURVE); the reader previously failed\nwith \"unsupported STEP entity: SURFACE_CURVE\". Dispatch these entities\nto their first-referenced 3D basis curve and intentionally ignore the\nassociated pcurves (surface parameterizations carry no solid geometry).\n\nVerified locally: cargo xtask wasm-build + test-wasm-smoke green; the\nocct-written box_boss.step fixture imports with volume > 0 through the\nrebuilt kernel.",
+          "timestamp": "2026-10-11T19:19:03+08:00",
+          "tree_id": "a3d4b3a9ade5bc0dc35ee73ab4c49301d7ff65cc",
+          "url": "https://github.com/Faicad/brepkit2/commit/ed5f2ffb5905e9d4cae1206b4a085b3feba4ee94"
+        },
+        "date": 1791719163466,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 999845,
+            "range": "± 3495",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1077889,
+            "range": "± 8573",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11901,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 743944,
+            "range": "± 11496",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 26802722,
+            "range": "± 81361",
             "unit": "ns/iter"
           }
         ]
