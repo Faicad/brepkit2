@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791725111437,
+  "lastUpdate": 1791774158111,
   "repoUrl": "https://github.com/Faicad/brepkit2",
   "entries": {
     "Boolean perf": [
@@ -1295,6 +1295,60 @@ window.BENCHMARK_DATA = {
             "name": "boolean/perforated_cut_36",
             "value": 24909468,
             "range": "± 498687",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "committer": {
+            "email": "yuan_xin_yu@hotmail.com",
+            "name": "Ylt",
+            "username": "yuan-xy"
+          },
+          "distinct": true,
+          "id": "e7e73b8a58d1ec5ed76ec22d59a84b9a3a420cfb",
+          "message": "fix(wasm): raise when both fillet engines fail instead of no-op success\n\nThe legacy fillet binding silently returned the ORIGINAL solid when the\nrolling-ball engine failed, the planar-face retry failed, and no\nplanar-face edges were left to retry — the caller could not tell a\nno-op from a success (B-WASM-01). Raise a JsError on that path instead;\nthe batch executor already propagates fillet failures, so batch\ncontract tests are unaffected. filletV2 already propagates engine\nerrors through ?.",
+          "timestamp": "2026-10-12T09:32:52+08:00",
+          "tree_id": "c26254b411a3e2d74a1a62b01cca2de3c305d7fa",
+          "url": "https://github.com/Faicad/brepkit2/commit/e7e73b8a58d1ec5ed76ec22d59a84b9a3a420cfb"
+        },
+        "date": 1791774157510,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "boolean/cut_box_box",
+            "value": 946524,
+            "range": "± 10276",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/fuse_box_box",
+            "value": 1025509,
+            "range": "± 3101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/intersect_box_box",
+            "value": 11932,
+            "range": "± 63",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/cut_cylinder_through_box",
+            "value": 707329,
+            "range": "± 353",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "boolean/perforated_cut_36",
+            "value": 24875479,
+            "range": "± 48968",
             "unit": "ns/iter"
           }
         ]
