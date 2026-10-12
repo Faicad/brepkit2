@@ -181,13 +181,13 @@ struct SweptWireData {
 /// Sweep a wire's vertices through the given frames, creating ring vertices,
 /// ring edges, and path edges.
 ///
-/// `centroid`, `initial_right/up/tangent` define the local coordinate system
+/// `anchor`, `initial_right/up/tangent` define the local coordinate system
 /// from which profile offsets are measured.
 #[allow(clippy::too_many_arguments)]
 fn sweep_wire_through_frames(
     topo: &mut Topology,
     wire_id: brepkit_topology::wire::WireId,
-    centroid: Point3,
+    anchor: Point3,
     initial_right: Vec3,
     initial_up: Vec3,
     initial_tangent: Vec3,
@@ -223,7 +223,7 @@ fn sweep_wire_through_frames(
             .map(|&pos| {
                 let transformed = transform_point(
                     pos,
-                    centroid,
+                    anchor,
                     initial_right,
                     initial_up,
                     initial_tangent,
@@ -418,45 +418,6 @@ pub fn densify_path_points(points: &[Point3]) -> Vec<Point3> {
 /// Interior samples used to confirm a path is a straight segment.
 const STRAIGHT_SAMPLES: usize = 8;
 
-/// Approximate the centroid of a planar profile's outer boundary by sampling
-/// its edges.
-///
-/// Sampling (rather than averaging stored vertices) is needed for a single
-/// closed circle, whose start and end vertex coincide at the seam — the seam
-/// point is not the center.
-fn profile_outer_centroid(
-    topo: &Topology,
-    profile: FaceId,
-) -> Result<Point3, crate::OperationsError> {
-    let face = topo.face(profile)?;
-    let wire = topo.wire(face.outer_wire())?;
-    let (mut sx, mut sy, mut sz) = (0.0_f64, 0.0_f64, 0.0_f64);
-    let mut count = 0_usize;
-    for oe in wire.edges() {
-        let edge = topo.edge(oe.edge())?;
-        let start = topo.vertex(edge.start())?.point();
-        let end = topo.vertex(edge.end())?.point();
-        let (t0, t1) = edge.curve().domain_with_endpoints(start, end);
-        // Four samples per edge span a closed circle's full sweep.
-        for k in 0..4 {
-            let t = t0 + (t1 - t0) * (f64::from(k) / 4.0);
-            let p = edge.curve().evaluate_with_endpoints(t, start, end);
-            sx += p.x();
-            sy += p.y();
-            sz += p.z();
-            count += 1;
-        }
-    }
-    if count == 0 {
-        return Err(crate::OperationsError::InvalidInput {
-            reason: "sweep profile has no outer-wire edges".into(),
-        });
-    }
-    #[allow(clippy::cast_precision_loss)]
-    let n = count as f64;
-    Ok(Point3::new(sx / n, sy / n, sz / n))
-}
-
 /// Fast exact path for a straight, perpendicular sweep: it is a prism, so
 /// delegate to [`crate::extrude::extrude`], which builds exact analytic side
 /// faces (a circular profile becomes a true cylinder matching π·r²·L). The
@@ -508,18 +469,10 @@ fn try_straight_extrude(
         return Ok(None);
     }
 
-    // Position a copy of the profile so its centroid lands on the path start —
-    // matching the general sweep's frame[0] placement — then extrude.
-    let centroid = profile_outer_centroid(topo, profile)?;
-    let moved = crate::copy::copy_face(topo, profile)?;
-    let shift = start - centroid;
-    crate::transform::transform_face(
-        topo,
-        moved,
-        &Mat4::translation(shift.x(), shift.y(), shift.z()),
-    )?;
-
-    Ok(Some(crate::extrude::extrude(topo, moved, dir, length)?))
+    // Positioned sweep (B-OPS-01): extrude the profile at its original
+    // world position — the prism keeps the profile's offset from the path
+    // line instead of being re-centered onto the path start.
+    Ok(Some(crate::extrude::extrude(topo, profile, dir, length)?))
 }
 
 /// Sweep a face along a path curve to produce a solid.
@@ -628,7 +581,11 @@ pub fn sweep(
         input_normal = -input_normal;
     }
 
-    let centroid = crate::winding::polygon_centroid(&input_positions);
+    // Positioned sweep (B-OPS-01): profile offsets are measured from the
+    // PATH START, not the profile centroid, so a profile away from the
+    // origin keeps its world offset from the path line while still being
+    // auto-oriented by the profile-basis mapping at every frame.
+    let anchor = path.evaluate(0.0);
 
     let num_segments = (path.control_points().len() * 2).max(4);
 
@@ -656,7 +613,7 @@ pub fn sweep(
             .map(|&pos| {
                 let transformed = transform_point(
                     pos,
-                    centroid,
+                    anchor,
                     initial_right,
                     initial_up,
                     initial_tangent,
@@ -716,7 +673,7 @@ pub fn sweep(
         inner_swept.push(sweep_wire_through_frames(
             topo,
             iw_id,
-            centroid,
+            anchor,
             initial_right,
             initial_up,
             initial_tangent,
@@ -913,7 +870,9 @@ pub fn sweep_smooth(
         input_normal = -input_normal;
     }
 
-    let centroid = crate::winding::polygon_centroid(&input_positions);
+    // Positioned sweep (B-OPS-01): offsets measured from the path start so
+    // the profile keeps its world offset from the path line.
+    let anchor = path.evaluate(0.0);
 
     let num_segments = (path.control_points().len() * 2).max(4);
     let up_hint = orthogonalize(input_normal, path_tangent_0);
@@ -934,7 +893,7 @@ pub fn sweep_smooth(
                 .map(|&pos| {
                     transform_point(
                         pos,
-                        centroid,
+                        anchor,
                         initial_right,
                         initial_up,
                         initial_tangent,
@@ -980,7 +939,7 @@ pub fn sweep_smooth(
         inner_swept_smooth.push(sweep_wire_through_frames(
             topo,
             iw_id,
-            centroid,
+            anchor,
             initial_right,
             initial_up,
             initial_tangent,
@@ -1276,7 +1235,9 @@ pub fn sweep_with_options(
         input_normal = -input_normal;
     }
 
-    let centroid = crate::winding::polygon_centroid(&input_positions);
+    // Positioned sweep (B-OPS-01): offsets measured from the path start so
+    // the profile keeps its world offset from the path line.
+    let anchor = path.evaluate(0.0);
 
     let num_segments = if options.segments > 0 {
         options.segments
@@ -1378,7 +1339,7 @@ pub fn sweep_with_options(
             .map(|&pos| {
                 let mut transformed = transform_point(
                     pos,
-                    centroid,
+                    anchor,
                     initial_right,
                     initial_up,
                     initial_tangent,
@@ -1429,7 +1390,7 @@ pub fn sweep_with_options(
         inner_swept_opts.push(sweep_wire_through_frames(
             topo,
             iw_id,
-            centroid,
+            anchor,
             initial_right,
             initial_up,
             initial_tangent,
@@ -1648,7 +1609,9 @@ fn sweep_miter(
         input_normal = -input_normal;
     }
 
-    let centroid = crate::winding::polygon_centroid(&input_positions);
+    // Positioned sweep (B-OPS-01): offsets measured from the path-domain
+    // start so the profile keeps its world offset from the path line.
+    let anchor = path.evaluate(domain_start);
 
     // Split the path at each kink to get smooth sub-curves.
     let mut sub_paths: Vec<NurbsCurve> = Vec::with_capacity(kinks.len() + 1);
@@ -1738,7 +1701,7 @@ fn sweep_miter(
                 .map(|&pos| {
                     let transformed = transform_point(
                         pos,
-                        centroid,
+                        anchor,
                         initial_right,
                         initial_up,
                         initial_tangent,
@@ -1921,7 +1884,7 @@ fn sweep_miter(
             inner_swept.push(sweep_wire_through_frames(
                 topo,
                 iw_id,
-                centroid,
+                anchor,
                 initial_right,
                 initial_up,
                 initial_tangent,
