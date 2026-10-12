@@ -188,12 +188,18 @@ pub fn compute_setbacks(
         };
         let budget = MAX_SETBACK_FRACTION * length;
 
+        // A setback larger than the per-end budget means the corner would
+        // swallow more than half the stripe. Clamping keeps the stripe short
+        // of the vertex so the corner patch still takes over; dropping the
+        // setback entirely lets the stripe run into the corner and overlap
+        // its neighbours (acute-angle prism corners need up to r/sin(θ)
+        // there — rejecting it outright breaks the shell).
         let start = setback_at(topo, adjacency, &at_vertex, va, edge, r_start)
-            .filter(|s| *s > 0.0 && *s < budget)
-            .unwrap_or(0.0);
+            .filter(|s| *s > 0.0)
+            .map_or(0.0, |s| s.min(budget));
         let end = setback_at(topo, adjacency, &at_vertex, vb, edge, r_end)
-            .filter(|s| *s > 0.0 && *s < budget)
-            .unwrap_or(0.0);
+            .filter(|s| *s > 0.0)
+            .map_or(0.0, |s| s.min(budget));
 
         out.insert(edge, (start, end));
     }

@@ -38,6 +38,16 @@ pub fn sample_nurbs_endpoints(curve: &NurbsCurve) -> Vec<Point3> {
 /// is adopted (with its vertices) when its endpoints match the stripe's
 /// contact endpoints within the weld band, in either orientation; otherwise
 /// that side falls back to a fresh edge.
+/// First and last traversal vertices of an adopted contact chain.
+fn chain_ends(topo: &Topology, oes: &[OrientedEdge]) -> Option<(VertexId, VertexId)> {
+    let first = oes.first()?;
+    let last = oes.last()?;
+    let e_first = topo.edge(first.edge()).ok()?;
+    let e_last = topo.edge(last.edge()).ok()?;
+    Some((first.oriented_start(e_first), last.oriented_end(e_last)))
+}
+
+/// Adopt the trimmed neighbour's contact boundary — see the caller.
 pub fn create_blend_face_with_contacts(
     topo: &mut Topology,
     stripe: &Stripe,
@@ -55,95 +65,160 @@ pub fn create_blend_face_with_contacts(
     let p2_start = stripe.contact2.evaluate(t0_2);
     let p2_end = stripe.contact2.evaluate(t1_2);
 
-    // Adopt a trimmer contact edge when its endpoints match `(want_s, want_e)`
-    // in either orientation: returns (edge, forward, start_vid, end_vid) in
-    // the WIRE traversal direction.
+    // Adopt the trimmed neighbour's contact boundary for the span
+    // `(want_s, want_e)`, returning the oriented-edge chain in traversal
+    // order — a single edge when the neighbour still holds the full span,
+    // or the run of sub-segments a LATER stripe's re-trim left behind.
     //
-    // The recorded contact edge can go stale: a later stripe's re-trim of the
-    // same face splits the earlier full-span contact edge, and only a shorter
-    // sub-segment survives in the trimmed face's wire. When direct adoption
-    // misses, scan the side's face wire for the edge whose endpoints match the
-    // stripe's own (setback-limited) contact endpoints, and adopt that.
+    // The recorded contact edge can go stale: a later stripe's re-trim of
+    // the same face splits the earlier full-span contact edge, and only
+    // shorter sub-segments survive in the trimmed face's wire. Direct
+    // adoption checks the recorded edge first; when it misses, walk the
+    // side's face wire from the vertex matching `want_s` to the one
+    // matching `want_e`, requiring every traversed edge to lie along the
+    // straight contact segment, and adopt that chain.
     let adopt = |topo: &Topology,
                  eid: Option<brepkit_topology::edge::EdgeId>,
                  face: Option<FaceId>,
                  want_s: Point3,
                  want_e: Point3|
-     -> Option<(brepkit_topology::edge::EdgeId, bool, VertexId, VertexId)> {
-        let matches_want = |sp: Point3, ep: Point3| {
-            (sp - want_s).length() <= WELD && (ep - want_e).length() <= WELD
-        };
+     -> Option<Vec<OrientedEdge>> {
         if let Some(eid) = eid {
             let e = topo.edge(eid).ok()?;
             let (sv, ev) = (e.start(), e.end());
             let sp = topo.vertex(sv).ok()?.point();
             let ep = topo.vertex(ev).ok()?.point();
-            if matches_want(sp, ep) {
-                return Some((eid, true, sv, ev));
+            if (sp - want_s).length() <= WELD && (ep - want_e).length() <= WELD {
+                return Some(vec![OrientedEdge::new(eid, true)]);
             }
             if (sp - want_e).length() <= WELD && (ep - want_s).length() <= WELD {
-                return Some((eid, false, ev, sv));
+                return Some(vec![OrientedEdge::new(eid, false)]);
             }
         }
-        // Wire re-scan: find the surviving contact segment in the trimmed
-        // face's current boundary.
+        // Chain walk along the trimmed face's current boundary.
         let face = face?;
         let wire = topo.face(face).ok()?.outer_wire();
-        for oe in topo.wire(wire).ok()?.edges() {
-            let e = topo.edge(oe.edge()).ok()?;
-            let (sv, ev) = (e.start(), e.end());
-            let sp = topo.vertex(sv).ok()?.point();
-            let ep = topo.vertex(ev).ok()?.point();
-            if matches_want(sp, ep) {
-                return Some((oe.edge(), true, sv, ev));
-            }
-            if (sp - want_e).length() <= WELD && (ep - want_s).length() <= WELD {
-                return Some((oe.edge(), false, ev, sv));
-            }
+        let oes = topo.wire(wire).ok()?.edges().to_vec();
+        let n = oes.len();
+        if n == 0 {
+            return None;
         }
-        None
+        let vertex_pos =
+            |vid: VertexId| -> Option<Point3> { topo.vertex(vid).ok().map(Vertex::point) };
+        let on_segment = |q: Point3| -> bool {
+            let d = want_e - want_s;
+            let len2 = d.length_squared();
+            if len2 <= 1e-18 {
+                return false;
+            }
+            let t = (q - want_s).dot(d) / len2;
+            if !(-1e-9..=1.0 + 1e-9).contains(&t) {
+                return false;
+            }
+            (want_s + d * t - q).length() <= WELD
+        };
+        // At a T junction several wire edges can start at `want_s` (the
+        // contact segment and a later stripe's contact line meeting it),
+        // so a start candidate must also run ALONG the segment: require
+        // its far endpoint to lie on it before walking.
+        let start_idx = (0..n).find(|&i| {
+            topo.edge(oes[i].edge()).ok().and_then(|e| {
+                let sp = vertex_pos(oes[i].oriented_start(e))?;
+                let tp = vertex_pos(oes[i].oriented_end(e))?;
+                Some((sp - want_s).length() <= WELD && on_segment(tp))
+            }) == Some(true)
+        });
+        let end_idx = (0..n).find(|&i| {
+            topo.edge(oes[i].edge()).ok().and_then(|e| {
+                let sp = vertex_pos(oes[i].oriented_start(e))?;
+                let tp = vertex_pos(oes[i].oriented_end(e))?;
+                Some((tp - want_s).length() <= WELD && on_segment(sp))
+            }) == Some(true)
+        });
+        // The wire may traverse the contact span in either direction.
+        // Forward: an occurrence starts at `want_s`; walk forward to the
+        // one ending at `want_e`. Backward: an occurrence ENDS at
+        // `want_s`; walk backward to the one starting at `want_e`, then
+        // reverse the collected run (flipping each orientation) so the
+        // chain still reads want_s → want_e.
+        match (start_idx, end_idx) {
+            (Some(start_idx), _) => {
+                let mut chain: Vec<OrientedEdge> = Vec::new();
+                let mut cur = start_idx;
+                loop {
+                    let oe = oes[cur];
+                    let e = topo.edge(oe.edge()).ok()?;
+                    let sp = vertex_pos(oe.oriented_start(e))?;
+                    let tp = vertex_pos(oe.oriented_end(e))?;
+                    if !on_segment(sp) || !on_segment(tp) {
+                        return None;
+                    }
+                    chain.push(oe);
+                    if (tp - want_e).length() <= WELD {
+                        return Some(chain);
+                    }
+                    cur = (cur + 1) % n;
+                    if chain.len() >= n {
+                        return None;
+                    }
+                }
+            }
+            (None, Some(end_idx)) => {
+                let mut chain: Vec<OrientedEdge> = Vec::new();
+                let mut cur = end_idx;
+                loop {
+                    let oe = oes[cur];
+                    let e = topo.edge(oe.edge()).ok()?;
+                    let sp = vertex_pos(oe.oriented_start(e))?;
+                    let tp = vertex_pos(oe.oriented_end(e))?;
+                    if !on_segment(sp) || !on_segment(tp) {
+                        return None;
+                    }
+                    chain.push(OrientedEdge::new(oe.edge(), !oe.is_forward()));
+                    if (sp - want_e).length() <= WELD {
+                        chain.reverse();
+                        return Some(chain);
+                    }
+                    cur = (cur + n - 1) % n;
+                    if chain.len() >= n {
+                        return None;
+                    }
+                }
+            }
+            (None, None) => None,
+        }
     };
-    let adopt1 = adopt(topo, contact1_edge, contact1_face, p1_start, p1_end);
+    let chain1 = adopt(topo, contact1_edge, contact1_face, p1_start, p1_end);
     // Contact 2 traverses end -> start in the quad below.
-    let adopt2 = adopt(topo, contact2_edge, contact2_face, p2_end, p2_start);
+    let chain2 = adopt(topo, contact2_edge, contact2_face, p2_end, p2_start);
 
-    // Create/reuse vertices (snapshot then allocate).
-    let (v1s, v1e) = adopt1.map_or_else(
-        || {
+    // Create/reuse vertices (snapshot then allocate). An adopted chain's
+    // endpoints are the trimmer's own vertices — reusing them is what lets
+    // the end-cap notch (which keys on `VertexId`) match later.
+    let (v1s, v1e) = chain1
+        .as_ref()
+        .and_then(|oes| chain_ends(topo, oes))
+        .unwrap_or_else(|| {
             (
                 topo.add_vertex(Vertex::new(p1_start, 1e-7)),
                 topo.add_vertex(Vertex::new(p1_end, 1e-7)),
             )
-        },
-        |(_, _, s, e)| (s, e),
-    );
-    let (v2e, v2s) = adopt2.map_or_else(
-        || {
+        });
+    let (v2e, v2s) = chain2
+        .as_ref()
+        .and_then(|oes| chain_ends(topo, oes))
+        .unwrap_or_else(|| {
             (
                 topo.add_vertex(Vertex::new(p2_end, 1e-7)),
                 topo.add_vertex(Vertex::new(p2_start, 1e-7)),
             )
-        },
-        |(_, _, s, e)| (s, e),
-    );
+        });
 
-    // Build quad: p1_start -> p1_end -> p2_end -> p2_start -> p1_start.
-    // Use actual contact curves for e0 and e2 (the longitudinal edges along
-    // the spine direction). Cross edges e1 and e3 are straight lines connecting
-    // the two contact curves at the spine endpoints.
-    let (e0, e0_fwd) = adopt1.map_or_else(
-        || {
-            (
-                topo.add_edge(Edge::new(
-                    v1s,
-                    v1e,
-                    EdgeCurve::NurbsCurve(stripe.contact1.clone()),
-                )),
-                true,
-            )
-        },
-        |(eid, fwd, _, _)| (eid, fwd),
-    );
+    // Build the blend loop: contact1 side (p1_start → p1_end), cross end,
+    // contact2 side (p2_end → p2_start), cross start. An adopted chain's
+    // occurrences are used verbatim so the blend face shares the neighbour's
+    // sub-segment edge entities; a side without adoption falls back to a
+    // fresh longitudinal edge along the stripe's own contact curve.
     // Cross edges carry the true end cross-section arcs when the stripe has
     // sections: the fillet's end profile is a circular arc, and a straight
     // chord both misrepresents the surface boundary and can never be shared
@@ -169,30 +244,32 @@ pub fn create_blend_face_with_contacts(
         .and_then(|sec| arc_curve(sec, p2_start, p1_start))
         .unwrap_or(EdgeCurve::Line);
     let e1 = topo.add_edge(Edge::new(v1e, v2e, end_curve));
-    let (e2, e2_fwd) = adopt2.map_or_else(
-        || {
-            (
-                topo.add_edge(Edge::new(
-                    v2e,
-                    v2s,
-                    EdgeCurve::NurbsCurve(stripe.contact2.clone()),
-                )),
-                true,
-            )
-        },
-        |(eid, fwd, _, _)| (eid, fwd),
-    );
     let e3 = topo.add_edge(Edge::new(v2s, v1s, start_curve));
 
-    let wire = Wire::new(
-        vec![
-            OrientedEdge::new(e0, e0_fwd),
-            OrientedEdge::new(e1, true),
-            OrientedEdge::new(e2, e2_fwd),
-            OrientedEdge::new(e3, true),
-        ],
-        true,
-    )?;
+    let mut loop_edges: Vec<OrientedEdge> = if let Some(oes) = &chain1 {
+        oes.clone()
+    } else {
+        let e0 = topo.add_edge(Edge::new(
+            v1s,
+            v1e,
+            EdgeCurve::NurbsCurve(stripe.contact1.clone()),
+        ));
+        vec![OrientedEdge::new(e0, true)]
+    };
+    loop_edges.push(OrientedEdge::new(e1, true));
+    if let Some(oes) = &chain2 {
+        loop_edges.extend(oes.iter().copied());
+    } else {
+        let e2 = topo.add_edge(Edge::new(
+            v2e,
+            v2s,
+            EdgeCurve::NurbsCurve(stripe.contact2.clone()),
+        ));
+        loop_edges.push(OrientedEdge::new(e2, true));
+    }
+    loop_edges.push(OrientedEdge::new(e3, true));
+
+    let wire = Wire::new(loop_edges, true)?;
     let wire_id = topo.add_wire(wire);
 
     let face = Face::new(wire_id, Vec::new(), stripe.surface.clone());
