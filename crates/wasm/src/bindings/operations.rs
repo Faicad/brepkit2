@@ -250,7 +250,9 @@ impl BrepKernel {
     ///
     /// # Errors
     ///
-    /// Returns an error if radius is non-positive or edges are invalid.
+    /// Returns an error if radius is non-positive, edges are invalid, or BOTH
+    /// fillet engines fail with no planar-face retry possible — raising beats
+    /// silently handing back the unmodified solid.
     #[wasm_bindgen(js_name = "fillet")]
     #[allow(clippy::needless_pass_by_value)]
     pub fn fillet_solid(
@@ -283,11 +285,15 @@ impl BrepKernel {
                         &self.topo, solid_id, &edge_ids,
                     )?;
                     if planar_edges.is_empty() {
-                        solid_id
-                    } else {
-                        try_fillet(self.topo_mut(), solid_id, &planar_edges, radius)
-                            .map_err(|e| JsError::new(&e.to_string()))?
+                        // Both engines failed and no planar-face retry is
+                        // possible: raising beats silently handing back the
+                        // unmodified solid (B-WASM-01).
+                        return Err(JsError::new(
+                            "fillet failed on all requested edges (no planar-face retry possible)",
+                        ));
                     }
+                    try_fillet(self.topo_mut(), solid_id, &planar_edges, radius)
+                        .map_err(|e| JsError::new(&e.to_string()))?
                 };
                 Ok(solid_id_to_u32(solid))
             }));
