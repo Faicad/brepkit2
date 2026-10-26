@@ -153,6 +153,19 @@ impl BrepKernel {
         Ok(report.error_count() as u32)
     }
 
+    /// Debug: return the validation report as a newline-separated string.
+    #[wasm_bindgen(js_name = "validateSolidDebug")]
+    pub fn validate_solid_debug(&self, solid: u32) -> Result<String, JsError> {
+        let solid_id = self.resolve_solid(solid)?;
+        let report = brepkit_operations::validate::validate_solid(&self.topo, solid_id)?;
+        Ok(report
+            .issues
+            .iter()
+            .map(|i| format!("[{:?}] {}", i.severity, i.description))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
     /// Validate a solid with relaxed checks suitable for assembled geometry.
     ///
     /// Operations like boolean, fillet, and shell produce geometrically

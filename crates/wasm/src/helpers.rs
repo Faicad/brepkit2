@@ -152,6 +152,99 @@ pub fn json_f64(val: &serde_json::Value, key: &str) -> Result<f64, JsError> {
 /// is watertight too (#834). It runs first; the `FilletBuilder` and a flat
 /// bevel are fallbacks.
 ///
+/// Reorient shell faces so adjacent faces traverse each shared edge in
+/// opposite directions. BFS from the first face; when a neighbor's edge
+/// sense matches the current face's sense, flip the neighbor.
+#[allow(dead_code)]
+pub fn reorient_shell(
+    topo: &mut brepkit_topology::Topology,
+    solid: brepkit_topology::solid::SolidId,
+) {
+    let shell_id = match topo.solid(solid) {
+        Ok(sd) => sd.outer_shell(),
+        Err(_) => return,
+    };
+    let shell = match topo.shell(shell_id) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let faces = shell.faces().to_vec();
+    if faces.is_empty() {
+        return;
+    }
+
+    let mut edge_uses: std::collections::HashMap<
+        brepkit_topology::edge::EdgeId,
+        Vec<(usize, bool)>,
+    > = std::collections::HashMap::new();
+
+    for (fi, &fid) in faces.iter().enumerate() {
+        let face = match topo.face(fid) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let fr = face.is_reversed();
+        let wires: Vec<_> = std::iter::once(face.outer_wire())
+            .chain(face.inner_wires().iter().copied())
+            .collect();
+        for w in wires {
+            let wire = match topo.wire(w) {
+                Ok(w) => w,
+                Err(_) => continue,
+            };
+            for oe in wire.edges() {
+                let fwd = oe.is_forward() != fr;
+                edge_uses.entry(oe.edge()).or_default().push((fi, fwd));
+            }
+        }
+    }
+
+    let mut visited = vec![false; faces.len()];
+    let mut queue = std::collections::VecDeque::new();
+    visited[0] = true;
+    queue.push_back(0);
+
+    while let Some(fi) = queue.pop_front() {
+        let fid = faces[fi];
+        let face = match topo.face(fid) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let fr = face.is_reversed();
+        let mut my_edges: Vec<(brepkit_topology::edge::EdgeId, bool)> = Vec::new();
+        let wires: Vec<_> = std::iter::once(face.outer_wire())
+            .chain(face.inner_wires().iter().copied())
+            .collect();
+        for w in wires {
+            let wire = match topo.wire(w) {
+                Ok(w) => w,
+                Err(_) => continue,
+            };
+            for oe in wire.edges() {
+                my_edges.push((oe.edge(), oe.is_forward() != fr));
+            }
+        }
+        for (eid, my_fwd) in my_edges {
+            let uses = match edge_uses.get(&eid) {
+                Some(u) => u,
+                None => continue,
+            };
+            for &(nfi, n_fwd) in uses {
+                if nfi == fi || visited[nfi] {
+                    continue;
+                }
+                if my_fwd == n_fwd
+                    && let Ok(nf) = topo.face_mut(faces[nfi])
+                {
+                    nf.set_reversed(!nf.is_reversed());
+                }
+                visited[nfi] = true;
+                queue.push_back(nfi);
+            }
+        }
+    }
+}
+
 /// Every candidate is validated as a closed (watertight) solid before being
 /// accepted, so a malformed result is rejected in favour of the next engine
 /// and, if none qualifies, the solid is returned unchanged. This guard lets
@@ -172,12 +265,7 @@ pub fn try_fillet(
     }
     let edges = edges.as_slice();
 
-    // A candidate is acceptable only if its outer shell is a CLOSED 2-manifold
-    // (every edge used by exactly two faces — no free/boundary edges). The
-    // weaker manifold-only check silently accepted open shells (e.g. a fillet
-    // that leaves a cap untrimmed at a contact circle), which tessellate to a
-    // plausible-but-wrong volume; reject them so the next engine or the
-    // unchanged input is used.
+    // A candidate is acceptable only if its outer shell is a CLOSED 2-manifold.
     let is_valid =
         |topo: &brepkit_topology::Topology, s: brepkit_topology::solid::SolidId| -> bool {
             topo.solid(s)
@@ -203,8 +291,12 @@ pub fn try_fillet(
         return Ok(s);
     }
 
-    // No engine produced a valid solid — leave the input unchanged.
-    Ok(solid_id)
+    // No engine produced a valid solid — signal failure so the caller can
+    // try the planar-edge fallback or raise. Returning Ok(original) here
+    // silently no-ops, which the caller cannot distinguish from success.
+    Err(brepkit_operations::OperationsError::InvalidInput {
+        reason: "no fillet engine produced a valid closed solid".to_string(),
+    })
 }
 
 /// Extract a human-readable message from a `catch_unwind` panic payload.

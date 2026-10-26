@@ -292,9 +292,23 @@ impl BrepKernel {
                             "fillet failed on all requested edges (no planar-face retry possible)",
                         ));
                     }
-                    try_fillet(self.topo_mut(), solid_id, &planar_edges, radius)
-                        .map_err(|e| JsError::new(&e.to_string()))?
+                    let retried = try_fillet(self.topo_mut(), solid_id, &planar_edges, radius)
+                        .map_err(|e| JsError::new(&e.to_string()))?;
+                    // If the planar retry no-op'd (filter_filletable_edges
+                    // emptied the list), it returns the original solid — treat
+                    // as failure, not success.
+                    if retried == solid_id {
+                        return Err(JsError::new(
+                            "fillet failed on all requested edges (planar retry no-op'd)",
+                        ));
+                    }
+                    retried
                 };
+                // If the primary path no-op'd (all edges filtered out), raise
+                // rather than silently returning the unmodified solid.
+                if solid == solid_id {
+                    return Err(JsError::new("fillet: no requested edges were filleted"));
+                }
                 Ok(solid_id_to_u32(solid))
             }));
         match result {
